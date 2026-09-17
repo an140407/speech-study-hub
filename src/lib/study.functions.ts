@@ -25,27 +25,17 @@ export const generateMaterial = createServerFn({ method: "POST" })
     const material = await generateStudyMaterial(data.topic);
     const db = serverPublicClient();
 
-    const { data: topic, error: tErr } = await db
-      .from("topics")
-      .insert({ title: data.topic })
-      .select("id")
-      .single();
-    if (tErr || !topic) throw new Error("Não foi possível salvar o tópico.");
-
-    const topic_id = topic.id;
-    const [m, f, q] = await Promise.all([
-      db.from("materials").insert([
-        { topic_id, type: "summary", content: { text: material.summary } },
-        { topic_id, type: "mindmap", content: material.mindmap },
-        { topic_id, type: "clinical_case", content: material.clinical_case },
-        { topic_id, type: "review_questions", content: { items: material.review_questions } },
-      ]),
-      db.from("flashcards").insert(material.flashcards.map((c) => ({ topic_id, ...c }))),
-      db.from("mcq_questions").insert(material.mcq.map((c) => ({ topic_id, ...c }))),
-    ]);
-    const err = m.error ?? f.error ?? q.error;
-    if (err) {
-      console.error(err);
+    const { data: topic_id, error } = await db.rpc("save_generated_material", {
+      p_topic: data.topic,
+      p_summary: material.summary,
+      p_mindmap: material.mindmap,
+      p_clinical_case: material.clinical_case,
+      p_review_questions: material.review_questions,
+      p_flashcards: material.flashcards,
+      p_mcq: material.mcq,
+    });
+    if (error || !topic_id) {
+      console.error(error);
       throw new Error("Não foi possível salvar o material.");
     }
 

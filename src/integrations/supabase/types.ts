@@ -166,7 +166,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      save_generated_material: {
+        Args: {
+          p_topic: string
+          p_summary: string
+          p_mindmap: Json
+          p_clinical_case: Json
+          p_review_questions: Json
+          p_flashcards: Json
+          p_mcq: Json
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
