@@ -104,7 +104,7 @@ async function callModel(topic: string): Promise<string> {
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPrompt + " — responda em JSON." },
       ],
-      response_format: { type: "json_object" },
+      response_format: { type: "json_schema", json_schema: { name: "study_material", strict: true, schema: JSON_SCHEMA } },
     }),
   });
   if (!res.ok) {
@@ -118,14 +118,68 @@ async function callModel(topic: string): Promise<string> {
   return json.choices?.[0]?.message?.content ?? "";
 }
 
+const JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "mindmap", "flashcards", "mcq", "clinical_case", "review_questions"],
+  properties: {
+    summary: { type: "string" },
+    mindmap: {
+      type: "object",
+      additionalProperties: false,
+      required: ["topic", "branches"],
+      properties: {
+        topic: { type: "string" },
+        branches: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["title", "children"],
+            properties: { title: { type: "string" }, children: { type: "array", items: { type: "string" } } },
+          },
+        },
+      },
+    },
+    flashcards: {
+      type: "array",
+      items: { type: "object", additionalProperties: false, required: ["front", "back"], properties: { front: { type: "string" }, back: { type: "string" } } },
+    },
+    mcq: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["question", "options", "correct_index", "explanation"],
+        properties: {
+          question: { type: "string" },
+          options: { type: "array", items: { type: "string" } },
+          correct_index: { type: "integer" },
+          explanation: { type: "string" },
+        },
+      },
+    },
+    clinical_case: {
+      type: "object",
+      additionalProperties: false,
+      required: ["scenario", "guiding_questions"],
+      properties: { scenario: { type: "string" }, guiding_questions: { type: "array", items: { type: "string" } } },
+    },
+    review_questions: { type: "array", items: { type: "string" } },
+  },
+};
+
 export async function generateStudyMaterial(topic: string): Promise<GeneratedMaterial> {
-  const raw = await callModel(topic);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(extractJson(raw));
-  } catch (e) {
-    console.error("JSON parse failed", e, raw.slice(0, 500));
-    throw new Error("A IA devolveu um formato inesperado. Tente novamente.");
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await callModel(topic);
+    try {
+      return validate(JSON.parse(extractJson(raw)));
+    } catch (e) {
+      lastError = e;
+      console.error(`Parse/validate failed (attempt ${attempt + 1})`, e, raw.slice(0, 300));
+    }
   }
-  return validate(parsed);
+  console.error(lastError);
+  throw new Error("A IA devolveu um formato inesperado. Tente novamente.");
 }

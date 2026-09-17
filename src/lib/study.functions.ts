@@ -20,7 +20,7 @@ function serverPublicClient() {
 }
 
 export const generateMaterial = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => z.object({ topic: z.string().trim().min(3).max(120) }).parse(input))
+  .validator((input: unknown) => z.object({ topic: z.string().trim().min(3).max(120) }).parse(input))
   .handler(async ({ data }) => {
     const material = await generateStudyMaterial(data.topic);
     const db = serverPublicClient();
