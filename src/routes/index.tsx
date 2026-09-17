@@ -12,9 +12,9 @@ import { Input } from "@/components/ui/input";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "FonoEstuda — Material de estudo de Fonoaudiologia com IA" },
+      { title: "FonoLab — Material de estudo de Fonoaudiologia com IA" },
       { name: "description", content: "Digite um tema de Fonoaudiologia e receba resumo, mapa mental, flashcards, questões e caso clínico." },
-      { property: "og:title", content: "FonoEstuda — Estude Fonoaudiologia com IA" },
+      { property: "og:title", content: "FonoLab — Estude Fonoaudiologia com IA" },
       { property: "og:description", content: "Resumos, flashcards, questões e casos clínicos gerados por IA." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

@@ -9,7 +9,7 @@ export function AppHeader() {
           <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-soft">
             <Ear className="size-5" />
           </span>
-          <span className="font-serif text-xl font-semibold tracking-tight">FonoEstuda</span>
+          <span className="font-serif text-xl font-semibold tracking-tight">FonoLab</span>
         </Link>
         <nav className="flex items-center gap-1 text-sm">
           <Link

@@ -12,9 +12,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/prova")({
   head: () => ({
     meta: [
-      { title: "Modo Prova — FonoEstuda" },
+      { title: "Modo Prova — FonoLab" },
       { name: "description", content: "Monte uma prova com questões dos tópicos que você estudou e veja sua nota com gabarito comentado." },
-      { property: "og:title", content: "Modo Prova — FonoEstuda" },
+      { property: "og:title", content: "Modo Prova — FonoLab" },
       { property: "og:description", content: "Simule uma prova de Fonoaudiologia com questões dos seus tópicos." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

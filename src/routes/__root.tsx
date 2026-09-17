@@ -79,9 +79,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "FonoEstuda — Estude Fonoaudiologia com IA" },
+      { title: "FonoLab — Estude Fonoaudiologia com IA" },
       { name: "description", content: "Gere resumos, flashcards, questões e casos clínicos de Fonoaudiologia com IA." },
-      { property: "og:title", content: "FonoEstuda" },
+      { property: "og:title", content: "FonoLab" },
       { property: "og:description", content: "Material de estudo de Fonoaudiologia gerado por IA." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

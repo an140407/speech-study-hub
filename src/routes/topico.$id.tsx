@@ -13,9 +13,9 @@ import { ClinicalCase } from "@/components/study/ClinicalCase";
 export const Route = createFileRoute("/topico/$id")({
   head: () => ({
     meta: [
-      { title: "Tópico de estudo — FonoEstuda" },
+      { title: "Tópico de estudo — FonoLab" },
       { name: "description", content: "Resumo, mapa mental, flashcards, questões, caso clínico e revisão de um tema de Fonoaudiologia." },
-      { property: "og:title", content: "Tópico de estudo — FonoEstuda" },
+      { property: "og:title", content: "Tópico de estudo — FonoLab" },
       { property: "og:description", content: "Material completo de estudo de Fonoaudiologia gerado por IA." },
       { property: "og:type", content: "article" },
       { name: "twitter:card", content: "summary_large_image" },
