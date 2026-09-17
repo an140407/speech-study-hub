@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProvaRouteImport } from './routes/prova'
+import { Route as TopicoIdRouteImport } from './routes/topico.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProvaRoute = ProvaRouteImport.update({
+  id: '/prova',
+  path: '/prova',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TopicoIdRoute = TopicoIdRouteImport.update({
+  id: '/topico/$id',
+  path: '/topico/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/prova': typeof ProvaRoute
+  '/topico/$id': typeof TopicoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/prova': typeof ProvaRoute
+  '/topico/$id': typeof TopicoIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/prova': typeof ProvaRoute
+  '/topico/$id': typeof TopicoIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/prova' | '/topico/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/prova' | '/topico/$id'
+  id: '__root__' | '/' | '/prova' | '/topico/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ProvaRoute: typeof ProvaRoute
+  TopicoIdRoute: typeof TopicoIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +68,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/prova': {
+      id: '/prova'
+      path: '/prova'
+      fullPath: '/prova'
+      preLoaderRoute: typeof ProvaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/topico/$id': {
+      id: '/topico/$id'
+      path: '/topico/$id'
+      fullPath: '/topico/$id'
+      preLoaderRoute: typeof TopicoIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ProvaRoute: ProvaRoute,
+  TopicoIdRoute: TopicoIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
