@@ -56,14 +56,14 @@ function ExamPage() {
   });
 
   async function startExam() {
-    if (selected.length === 0) return toast.error("Escolha pelo menos um tópico.");
+    if (selected.length === 0) { toast.error("Escolha pelo menos um tópico."); return; }
     setBuilding(true);
     const { data, error } = await supabase
       .from("mcq_questions")
       .select("id, topic_id, question, options, correct_index, explanation")
       .in("topic_id", selected);
     setBuilding(false);
-    if (error || !data?.length) return toast.error("Não há questões para os tópicos escolhidos.");
+    if (error || !data?.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
     const picked = shuffle(data as unknown as McqRow[]).slice(0, size);
     setQuestions(picked);
     setAnswers(picked.map(() => null));

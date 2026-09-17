@@ -47,7 +47,7 @@ function Index() {
   async function handleGenerate(e?: React.FormEvent) {
     e?.preventDefault();
     const t = topic.trim();
-    if (t.length < 3) return toast.error("Digite um tema com pelo menos 3 letras.");
+    if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras."); return; }
     setLoading(true);
     try {
       const res = await generate({ data: { topic: t } });
