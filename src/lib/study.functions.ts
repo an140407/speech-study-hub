@@ -1,30 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
-import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import type { Database } from "@/integrations/supabase/types";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateStudyMaterial } from "./gemini.server";
 
-function authedClient(accessToken: string) {
-  return createClient<Database>(process.env["SUPABASE_URL"]!, process.env["SUPABASE_PUBLISHABLE_KEY"]!, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-}
-
 export const generateMaterial = createServerFn({ method: "POST" })
-  .validator((input: unknown) =>
-    z
-      .object({
-        topic: z.string().trim().min(3).max(120),
-        accessToken: z.string().min(1, "Sessão expirada. Faça login novamente."),
-      })
-      .parse(input),
-  )
-  .handler(async ({ data }) => {
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => z.object({ topic: z.string().trim().min(3).max(120) }).parse(input))
+  .handler(async ({ data, context }) => {
     const material = await generateStudyMaterial(data.topic);
-    const db = authedClient(data.accessToken);
 
-    const { data: topic_id, error } = await db.rpc("save_generated_material", {
+    const { data: topic_id, error } = await context.supabase.rpc("save_generated_material", {
       p_topic: data.topic,
       p_summary: material.summary,
       p_mindmap: material.mindmap,

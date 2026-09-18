@@ -1,15 +1,14 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Ear, GraduationCap, LogOut } from "lucide-react";
-import { useAuth } from "@/lib/auth";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 export function AppHeader() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
-    navigate({ to: "/login" });
+    await signOut();
+    navigate({ to: "/auth" });
   }
 
   return (
