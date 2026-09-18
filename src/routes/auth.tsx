@@ -35,7 +35,7 @@ function AuthPage() {
 
     if (result.error) {
       setBusy(false);
-      toast.error("Não foi possível entrar com o Google.");
+      toast.error(result.error.message || "Não foi possível entrar com o Google.");
       return;
     }
     if (result.redirected) return;
