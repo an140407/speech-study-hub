@@ -4,6 +4,7 @@ import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCase as ClinicalCaseT, Flashcard, Mcq, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
+import { RequireAuth, useAuth } from "@/lib/auth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
 import { McqPractice } from "@/components/study/McqPractice";
@@ -21,7 +22,11 @@ export const Route = createFileRoute("/topico/$id")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: TopicPage,
+  component: () => (
+    <RequireAuth>
+      <TopicPage />
+    </RequireAuth>
+  ),
 });
 
 async function loadTopic(id: string) {
@@ -55,7 +60,8 @@ const TABS = [
 
 function TopicPage() {
   const { id } = Route.useParams();
-  const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
+  const { user } = useAuth();
+  const q = useQuery({ queryKey: ["topic", id, user?.id], queryFn: () => loadTopic(id), enabled: !!user });
 
   if (q.isLoading) {
     return (

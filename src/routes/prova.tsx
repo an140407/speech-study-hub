@@ -8,6 +8,7 @@ import type { McqRow } from "@/lib/study-types";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { RequireAuth, useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/prova")({
   head: () => ({
@@ -20,7 +21,11 @@ export const Route = createFileRoute("/prova")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: ExamPage,
+  component: () => (
+    <RequireAuth>
+      <ExamPage />
+    </RequireAuth>
+  ),
 });
 
 const LETTERS = ["A", "B", "C", "D"];
@@ -46,8 +51,10 @@ function ExamPage() {
   const [current, setCurrent] = useState(0);
   const [building, setBuilding] = useState(false);
 
+  const { user } = useAuth();
   const topics = useQuery({
-    queryKey: ["topics"],
+    queryKey: ["topics", user?.id],
+    enabled: !!user,
     queryFn: async () => {
       const { data, error } = await supabase.from("topics").select("id, title, created_at").order("created_at", { ascending: false });
       if (error) throw error;

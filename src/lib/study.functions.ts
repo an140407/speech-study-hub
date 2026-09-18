@@ -4,26 +4,25 @@ import { z } from "zod";
 import type { Database } from "@/integrations/supabase/types";
 import { generateStudyMaterial } from "./gemini.server";
 
-function serverPublicClient() {
-  const key = process.env["SUPABASE_PUBLISHABLE_KEY"]!;
-  return createClient<Database>(process.env["SUPABASE_URL"]!, key, {
+function authedClient(accessToken: string) {
+  return createClient<Database>(process.env["SUPABASE_URL"]!, process.env["SUPABASE_PUBLISHABLE_KEY"]!, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      fetch: (input, init) => {
-        const h = new Headers(init?.headers);
-        if (key.startsWith("sb_") && h.get("Authorization") === `Bearer ${key}`) h.delete("Authorization");
-        h.set("apikey", key);
-        return fetch(input, { ...init, headers: h });
-      },
-    },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
   });
 }
 
 export const generateMaterial = createServerFn({ method: "POST" })
-  .validator((input: unknown) => z.object({ topic: z.string().trim().min(3).max(120) }).parse(input))
+  .validator((input: unknown) =>
+    z
+      .object({
+        topic: z.string().trim().min(3).max(120),
+        accessToken: z.string().min(1, "Sessão expirada. Faça login novamente."),
+      })
+      .parse(input),
+  )
   .handler(async ({ data }) => {
     const material = await generateStudyMaterial(data.topic);
-    const db = serverPublicClient();
+    const db = authedClient(data.accessToken);
 
     const { data: topic_id, error } = await db.rpc("save_generated_material", {
       p_topic: data.topic,
@@ -36,7 +35,7 @@ export const generateMaterial = createServerFn({ method: "POST" })
     });
     if (error || !topic_id) {
       console.error(error);
-      throw new Error("Não foi possível salvar o material.");
+      throw new Error("Não foi possível salvar o material. Sua sessão pode ter expirado — tente entrar de novo.");
     }
 
     return { topic_id, material };

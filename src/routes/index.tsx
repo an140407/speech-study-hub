@@ -6,6 +6,7 @@ import { BookOpen, Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMaterial } from "@/lib/study.functions";
+import { RequireAuth, useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -20,7 +21,11 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Index,
+  component: () => (
+    <RequireAuth>
+      <Index />
+    </RequireAuth>
+  ),
 });
 
 const EXAMPLES = ["Paralisia facial periférica", "Disfagia orofaríngea", "Gagueira do desenvolvimento", "Presbiacusia"];
@@ -31,9 +36,11 @@ function Index() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
+  const { user } = useAuth();
 
   const topics = useQuery({
-    queryKey: ["topics"],
+    queryKey: ["topics", user?.id],
+    enabled: !!user,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("topics")
@@ -50,7 +57,10 @@ function Index() {
     if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras."); return; }
     setLoading(true);
     try {
-      const res = await generate({ data: { topic: t } });
+      const { data: session } = await supabase.auth.getSession();
+      const accessToken = session.session?.access_token;
+      if (!accessToken) { toast.error("Sessão expirada. Faça login novamente."); return; }
+      const res = await generate({ data: { topic: t, accessToken } });
       await queryClient.invalidateQueries({ queryKey: ["topics"] });
       toast.success("Material gerado!");
       navigate({ to: "/topico/$id", params: { id: res.topic_id } });
