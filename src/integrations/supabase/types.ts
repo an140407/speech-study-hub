@@ -174,13 +174,13 @@ export type Database = {
     Functions: {
       save_generated_material: {
         Args: {
-          p_topic: string
-          p_summary: string
-          p_mindmap: Json
           p_clinical_case: Json
-          p_review_questions: Json
           p_flashcards: Json
           p_mcq: Json
+          p_mindmap: Json
+          p_review_questions: Json
+          p_summary: string
+          p_topic: string
         }
         Returns: string
       }
