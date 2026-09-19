@@ -204,6 +204,10 @@ function ExamPage() {
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>Questão {current + 1} de {questions.length}</span>
             <div className="flex items-center gap-3">
+              <span className={cn("flex items-center gap-1 font-medium tabular-nums", (seconds[current] ?? 0) >= SLOW_SECONDS && "text-destructive")}>
+                <Clock className="size-3.5" /> {fmt(seconds[current] ?? 0)}
+              </span>
+              <span className="tabular-nums">Total {fmt(totalSeconds)}</span>
               <span>{answers.filter((a) => a !== null).length} respondidas</span>
               <button type="button" onClick={exitExam} className="flex items-center gap-1 text-muted-foreground hover:text-destructive">
                 <X className="size-3.5" /> Sair
