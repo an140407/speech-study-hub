@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, GraduationCap, RotateCcw, X, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, BarChart3, CheckCircle2, Clock, GraduationCap, RotateCcw, X, XCircle } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { McqRow } from "@/lib/study-types";
@@ -37,6 +38,14 @@ function shuffle<T>(arr: T[]): T[] {
 
 type Stage = "setup" | "running" | "result";
 
+const SLOW_SECONDS = 180;
+
+function fmt(s: number) {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+
 function ExamPage() {
   const [stage, setStage] = useState<Stage>("setup");
   const [selected, setSelected] = useState<string[]>([]);
@@ -45,6 +54,19 @@ function ExamPage() {
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [current, setCurrent] = useState(0);
   const [building, setBuilding] = useState(false);
+  const [seconds, setSeconds] = useState<number[]>([]);
+  const [totalSeconds, setTotalSeconds] = useState(0);
+
+  // Cronômetro: conta o tempo na questão atual e o tempo total (sem limite).
+  useEffect(() => {
+    if (stage !== "running") return;
+    const t = setInterval(() => {
+      setTotalSeconds((v) => v + 1);
+      setSeconds((arr) => arr.map((v, i) => (i === current ? v + 1 : v)));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [stage, current]);
+
 
   const topics = useQuery({
     queryKey: ["topics"],
@@ -60,7 +82,7 @@ function ExamPage() {
     setBuilding(true);
     const { data, error } = await supabase
       .from("mcq_questions")
-      .select("id, topic_id, question, options, correct_index, explanation")
+      .select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at")
       .in("topic_id", selected);
     setBuilding(false);
     if (error || !data?.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
@@ -70,6 +92,8 @@ function ExamPage() {
     }
     setQuestions(picked);
     setAnswers(picked.map(() => null));
+    setSeconds(picked.map(() => 0));
+    setTotalSeconds(0);
     setCurrent(0);
     setStage("running");
   }
@@ -82,9 +106,26 @@ function ExamPage() {
       answers,
       score,
       total: questions.length,
+      question_seconds: seconds,
+      total_seconds: totalSeconds,
     });
     if (error) console.error(error);
   }
+
+  const bySubtopic = (() => {
+    const map: Record<string, { total: number; ok: number }> = {};
+    questions.forEach((q, i) => {
+      const key = q.subtopic?.trim() || "Sem sub-tópico";
+      const e = (map[key] ??= { total: 0, ok: 0 });
+      e.total++;
+      if (answers[i] === q.correct_index) e.ok++;
+    });
+    return Object.entries(map).map(([subtopic, v]) => ({
+      subtopic,
+      pct: Math.round((v.ok / v.total) * 100),
+      label: `${v.ok}/${v.total}`,
+    }));
+  })();
 
   const score = questions.reduce((acc, q, i) => acc + (answers[i] === q.correct_index ? 1 : 0), 0);
 
@@ -163,6 +204,10 @@ function ExamPage() {
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>Questão {current + 1} de {questions.length}</span>
             <div className="flex items-center gap-3">
+              <span className={cn("flex items-center gap-1 font-medium tabular-nums", (seconds[current] ?? 0) >= SLOW_SECONDS && "text-destructive")}>
+                <Clock className="size-3.5" /> {fmt(seconds[current] ?? 0)}
+              </span>
+              <span className="tabular-nums">Total {fmt(totalSeconds)}</span>
               <span>{answers.filter((a) => a !== null).length} respondidas</span>
               <button type="button" onClick={exitExam} className="flex items-center gap-1 text-muted-foreground hover:text-destructive">
                 <X className="size-3.5" /> Sair
@@ -231,11 +276,37 @@ function ExamPage() {
             <p className="mt-2 font-serif text-6xl font-semibold text-primary">
               {score}<span className="text-2xl text-muted-foreground">/{questions.length}</span>
             </p>
-            <p className="mt-2 text-muted-foreground">{Math.round((score / questions.length) * 100)}% de acertos</p>
+            <p className="mt-2 text-muted-foreground">
+              {Math.round((score / questions.length) * 100)}% de acertos · tempo total {fmt(totalSeconds)}
+            </p>
             <Button variant="outline" className="mt-5" onClick={() => { setStage("setup"); setQuestions([]); }}>
               <RotateCcw className="size-4" /> Nova prova
             </Button>
           </div>
+
+          {bySubtopic.length > 0 && (
+            <div className="card-soft p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <BarChart3 className="size-5 text-primary" />
+                <h2 className="text-lg font-semibold">Desempenho por sub-tópico</h2>
+              </div>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={bySubtopic} margin={{ top: 8, right: 8, bottom: 8, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="subtopic" tick={{ fontSize: 11 }} interval={0} height={50} angle={-15} textAnchor="end" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+                    <Tooltip formatter={(v: number, _n, p) => [`${v}% (${p.payload.label})`, "Acertos"]} />
+                    <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
+                      {bySubtopic.map((d, i) => (
+                        <Cell key={i} fill={`var(--branch-${(i % 6) + 1})`} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {questions.map((q, i) => {
             const ok = answers[i] === q.correct_index;
@@ -243,7 +314,10 @@ function ExamPage() {
               <div key={q.id} className="card-soft p-5">
                 <div className="flex items-start gap-2">
                   {ok ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /> : <XCircle className="mt-0.5 size-5 shrink-0 text-destructive" />}
-                  <p className="font-medium">{i + 1}. {q.question}</p>
+                  <p className="flex-1 font-medium">{i + 1}. {q.question}</p>
+                  <span className={cn("shrink-0 text-xs tabular-nums text-muted-foreground", (seconds[i] ?? 0) >= SLOW_SECONDS && "text-destructive")}>
+                    {fmt(seconds[i] ?? 0)}
+                  </span>
                 </div>
                 <ul className="mt-3 space-y-1.5 text-sm">
                   {q.options.map((opt, j) => (

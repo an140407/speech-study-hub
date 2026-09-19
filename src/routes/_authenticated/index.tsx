@@ -32,6 +32,8 @@ function Index() {
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
 
+  const [search, setSearch] = useState("");
+
   const topics = useQuery({
     queryKey: ["topics"],
     queryFn: async () => {
@@ -43,6 +45,39 @@ function Index() {
       return data;
     },
   });
+
+  const progress = useQuery({
+    queryKey: ["topics-progress"],
+    queryFn: async () => {
+      const [fc, mc, exams] = await Promise.all([
+        supabase.from("flashcards").select("topic_id, seen_at"),
+        supabase.from("mcq_questions").select("id, topic_id, seen_at"),
+        supabase.from("exam_attempts").select("question_ids"),
+      ]);
+      const map: Record<string, { fcTotal: number; fcSeen: number; mcTotal: number; mcSeen: number; exams: number }> = {};
+      const get = (t: string) => (map[t] ??= { fcTotal: 0, fcSeen: 0, mcTotal: 0, mcSeen: 0, exams: 0 });
+      for (const f of fc.data ?? []) { const e = get(f.topic_id); e.fcTotal++; if (f.seen_at) e.fcSeen++; }
+      const topicOfQuestion: Record<string, string> = {};
+      for (const m of mc.data ?? []) {
+        topicOfQuestion[m.id] = m.topic_id;
+        const e = get(m.topic_id); e.mcTotal++; if (m.seen_at) e.mcSeen++;
+      }
+      for (const a of exams.data ?? []) {
+        const ids = (a.question_ids as unknown as string[]) ?? [];
+        const topicsOf = new Set(ids.map((qid) => topicOfQuestion[qid]));
+        if (ids.length > 0 && topicsOf.size === 1) {
+          const only = [...topicsOf][0];
+          if (only) get(only).exams++;
+        }
+      }
+      return map;
+    },
+  });
+
+  const filtered = (topics.data ?? []).filter((t) =>
+    t.title.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
 
   async function handleGenerate(e?: React.FormEvent) {
     e?.preventDefault();
@@ -108,9 +143,17 @@ function Index() {
       </section>
 
       <section className="mt-16">
-        <div className="mb-4 flex items-center gap-2">
-          <BookOpen className="size-5 text-primary" />
-          <h2 className="text-2xl font-semibold">Tópicos estudados</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen className="size-5 text-primary" />
+            <h2 className="text-2xl font-semibold">Tópicos estudados</h2>
+          </div>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar tópico…"
+            className="h-10 w-full rounded-xl bg-card shadow-soft sm:w-64"
+          />
         </div>
         {topics.isLoading ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -120,22 +163,36 @@ function Index() {
           <div className="card-soft p-8 text-center text-muted-foreground">
             Nenhum tópico ainda. Gere o seu primeiro material acima.
           </div>
+        ) : !filtered.length ? (
+          <div className="card-soft p-8 text-center text-muted-foreground">
+            Nenhum tópico encontrado para “{search}”.
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {topics.data.map((t, i) => (
-              <Link
-                key={t.id}
-                to="/topico/$id"
-                params={{ id: t.id }}
-                className="card-soft group animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
-                <h3 className="text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
-                </p>
-              </Link>
-            ))}
+            {filtered.map((t, i) => {
+              const p = progress.data?.[t.id];
+              return (
+                <Link
+                  key={t.id}
+                  to="/topico/$id"
+                  params={{ id: t.id }}
+                  className="card-soft group animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
+                  style={{ animationDelay: `${i * 40}ms` }}
+                >
+                  <h3 className="text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                  </p>
+                  {p && (
+                    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                      <p>{p.fcSeen} de {p.fcTotal} flashcards revisados</p>
+                      <p>{p.mcSeen} de {p.mcTotal} questões revisadas</p>
+                      <p>{p.exams} {p.exams === 1 ? "prova feita" : "provas feitas"}</p>
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>

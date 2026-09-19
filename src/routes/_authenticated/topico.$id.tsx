@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { backfillSubtopics } from "@/lib/study-extra.functions";
 import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import type { ClinicalCase as ClinicalCaseT, Flashcard, Mcq, Mindmap } from "@/lib/study-types";
+import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -31,9 +33,9 @@ async function loadTopic(id: string) {
   const [topic, materials, flashcards, mcq, cases] = await Promise.all([
     supabase.from("topics").select("id, title, created_at").eq("id", id).single(),
     supabase.from("materials").select("type, content").eq("topic_id", id),
-    supabase.from("flashcards").select("front, back").eq("topic_id", id).order("created_at"),
-    supabase.from("mcq_questions").select("question, options, correct_index, explanation").eq("topic_id", id).order("created_at"),
-    supabase.from("clinical_cases").select("id, scenario, guiding_questions, case_explanation").eq("topic_id", id).order("created_at").limit(1),
+    supabase.from("flashcards").select("id, topic_id, front, back, subtopic, seen_at").eq("topic_id", id).order("created_at"),
+    supabase.from("mcq_questions").select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at").eq("topic_id", id).order("created_at"),
+    supabase.from("clinical_cases").select("id, topic_id, scenario, guiding_questions, case_explanation, created_at").eq("topic_id", id).order("created_at"),
   ]);
   if (topic.error) throw topic.error;
   const byType = Object.fromEntries((materials.data ?? []).map((m) => [m.type, m.content])) as Record<string, unknown>;
@@ -41,10 +43,10 @@ async function loadTopic(id: string) {
     topic: topic.data,
     summary: (byType["summary"] as { text?: string } | undefined)?.text ?? "",
     mindmap: (byType["mindmap"] as Mindmap | undefined) ?? null,
-    clinicalCase: (cases.data?.[0] as ClinicalCaseT | undefined) ?? null,
+    cases: (cases.data ?? []) as unknown as ClinicalCaseRow[],
     review: (byType["review_questions"] as { items?: string[] } | undefined)?.items ?? [],
-    flashcards: (flashcards.data ?? []) as Flashcard[],
-    mcq: (mcq.data ?? []) as unknown as Mcq[],
+    flashcards: (flashcards.data ?? []) as unknown as FlashcardRow[],
+    mcq: (mcq.data ?? []) as unknown as McqRow[],
   };
 }
 
@@ -75,6 +77,22 @@ function TopicPage() {
   const { id } = Route.useParams();
   const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
   const [maskMode, setMaskMode] = useState(true);
+  const queryClient = useQueryClient();
+  const backfill = useServerFn(backfillSubtopics);
+  const backfilled = useRef(false);
+
+  // Classifica em segundo plano flashcards/questões antigos sem sub-tópico.
+  useEffect(() => {
+    const d = q.data;
+    if (!d || backfilled.current) return;
+    const missing = d.flashcards.some((f) => !f.subtopic) || d.mcq.some((m) => !m.subtopic);
+    if (!missing) return;
+    backfilled.current = true;
+    backfill({ data: { topic_id: id } })
+      .then((r) => { if (r.updated) queryClient.invalidateQueries({ queryKey: ["topic", id] }); })
+      .catch(() => undefined);
+  }, [q.data, backfill, id, queryClient]);
+
 
   if (q.isLoading) {
     return (
@@ -129,17 +147,13 @@ function TopicPage() {
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
         </TabsContent>
         <TabsContent value="flashcards" className="mt-4 animate-fade-up">
-          <Flashcards cards={d.flashcards} />
+          <Flashcards cards={d.flashcards} topicId={id} />
         </TabsContent>
         <TabsContent value="questoes" className="mt-4 animate-fade-up">
-          <McqPractice questions={d.mcq} />
+          <McqPractice questions={d.mcq} topicId={id} />
         </TabsContent>
         <TabsContent value="caso" className="mt-4 animate-fade-up">
-          {d.clinicalCase ? (
-            <ClinicalCase data={d.clinicalCase} topicId={id} maskMode={maskMode} />
-          ) : (
-            <p className="text-muted-foreground">Sem caso clínico.</p>
-          )}
+          <ClinicalCase cases={d.cases} topicId={id} maskMode={maskMode} />
         </TabsContent>
         <TabsContent value="revisao" className="card-soft mt-4 animate-fade-up p-6">
           <p className="mb-4 text-sm text-muted-foreground">Perguntas para reflexão — sem gabarito. Tente responder com suas palavras.</p>
