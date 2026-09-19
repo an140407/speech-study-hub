@@ -1,33 +1,44 @@
 import type { ReactNode } from "react";
+import { HighlightableBlock, useHighlights } from "./highlight";
 
-function inline(text: string, key: number): ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return (
-    <span key={key}>
-      {parts.map((p, i) =>
-        p.startsWith("**") && p.endsWith("**") ? <strong key={i}>{p.slice(2, -2)}</strong> : p,
-      )}
-    </span>
-  );
-}
+/** Tiny markdown renderer: headings, bullet/numbered lists, bold, paragraphs.
+ *  Parágrafos e itens de lista são grifáveis (por bloco); títulos não são. */
+export function SimpleMarkdown({ text, topicId, maskMode }: { text: string; topicId: string; maskMode: boolean }) {
+  const { rangesFor, onSelect } = useHighlights(topicId, "resumo", undefined, maskMode);
 
-/** Tiny markdown renderer: headings, bullet/numbered lists, bold, paragraphs. */
-export function SimpleMarkdown({ text }: { text: string }) {
   const lines = text.replace(/\r/g, "").split("\n");
   const out: ReactNode[] = [];
   let list: { type: "ul" | "ol"; items: string[] } | null = null;
   let para: string[] = [];
   let k = 0;
+  let blockIndex = 0;
 
   const flushList = () => {
     if (!list) return;
     const Tag = list.type;
-    out.push(<Tag key={k++}>{list.items.map((it, i) => <li key={i}>{inline(it, i)}</li>)}</Tag>);
+    out.push(
+      <Tag key={k++}>
+        {list.items.map((it) => {
+          const bi = blockIndex++;
+          return (
+            <li key={bi}>
+              <HighlightableBlock blockIndex={bi} text={it} ranges={rangesFor(bi)} onSelect={onSelect} />
+            </li>
+          );
+        })}
+      </Tag>,
+    );
     list = null;
   };
   const flushPara = () => {
     if (para.length === 0) return;
-    out.push(<p key={k++}>{inline(para.join(" "), 0)}</p>);
+    const bi = blockIndex++;
+    const text = para.join(" ");
+    out.push(
+      <p key={k++}>
+        <HighlightableBlock blockIndex={bi} text={text} ranges={rangesFor(bi)} onSelect={onSelect} />
+      </p>,
+    );
     para = [];
   };
 
@@ -40,7 +51,7 @@ export function SimpleMarkdown({ text }: { text: string }) {
       flushList();
       flushPara();
       const lvl = h[1]!.length;
-      const content = inline(h[2]!, 0);
+      const content = h[2]!.replace(/\*\*/g, "");
       out.push(lvl === 1 ? <h1 key={k++}>{content}</h1> : lvl === 2 ? <h2 key={k++}>{content}</h2> : <h3 key={k++}>{content}</h3>);
     } else if (ul || ol) {
       flushPara();

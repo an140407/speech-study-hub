@@ -208,6 +208,7 @@ export type Database = {
           topic_id: string
           content_type: string
           case_id: string | null
+          block_index: number
           start_offset: number
           end_offset: number
           created_at: string
@@ -217,6 +218,7 @@ export type Database = {
           topic_id: string
           content_type: string
           case_id?: string | null
+          block_index?: number
           start_offset: number
           end_offset: number
           created_at?: string
@@ -226,6 +228,7 @@ export type Database = {
           topic_id?: string
           content_type?: string
           case_id?: string | null
+          block_index?: number
           start_offset?: number
           end_offset?: number
           created_at?: string

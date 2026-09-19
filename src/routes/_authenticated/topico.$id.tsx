@@ -1,17 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope } from "lucide-react";
-import { Highlighter, EyeOff } from "lucide-react";
+import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCase as ClinicalCaseT, Flashcard, Mcq, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
+import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
 import { McqPractice } from "@/components/study/McqPractice";
 import { MindMap } from "@/components/study/MindMap";
 import { ClinicalCase } from "@/components/study/ClinicalCase";
-import { Highlightable } from "@/components/study/Highlightable";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_authenticated/topico/$id")({
@@ -57,6 +56,22 @@ const TABS = [
   { v: "caso", label: "Caso Clínico", Icon: Stethoscope },
   { v: "revisao", label: "Revisão", Icon: HelpCircle },
 ];
+
+function RevisaoTab({ topicId, review, maskMode }: { topicId: string; review: string[]; maskMode: boolean }) {
+  const { rangesFor, onSelect } = useHighlights(topicId, "revisao", undefined, maskMode);
+  return (
+    <ol className="space-y-3">
+      {review.map((r, i) => (
+        <li key={i} className="flex gap-3">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{i + 1}</span>
+          <p className="pt-0.5 leading-relaxed">
+            <HighlightableBlock blockIndex={i} text={r} ranges={rangesFor(i)} onSelect={onSelect} />
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 function TopicPage() {
   const { id } = Route.useParams();
@@ -110,9 +125,7 @@ function TopicPage() {
         </TabsList>
 
         <TabsContent value="resumo" className="card-soft mt-4 animate-fade-up p-6 md:p-8">
-          <Highlightable topicId={id} contentType="resumo" maskMode={maskMode}>
-            <SimpleMarkdown text={d.summary} />
-          </Highlightable>
+          <SimpleMarkdown text={d.summary} topicId={id} maskMode={maskMode} />
         </TabsContent>
         <TabsContent value="mapa" className="mt-4 animate-fade-up">
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
@@ -125,25 +138,14 @@ function TopicPage() {
         </TabsContent>
         <TabsContent value="caso" className="mt-4 animate-fade-up">
           {d.clinicalCase ? (
-            <Highlightable topicId={id} contentType="caso_clinico" caseId={d.clinicalCase.id} maskMode={maskMode}>
-              <ClinicalCase data={d.clinicalCase} />
-            </Highlightable>
+            <ClinicalCase data={d.clinicalCase} topicId={id} maskMode={maskMode} />
           ) : (
             <p className="text-muted-foreground">Sem caso clínico.</p>
           )}
         </TabsContent>
         <TabsContent value="revisao" className="card-soft mt-4 animate-fade-up p-6">
           <p className="mb-4 text-sm text-muted-foreground">Perguntas para reflexão — sem gabarito. Tente responder com suas palavras.</p>
-          <Highlightable topicId={id} contentType="revisao" maskMode={maskMode}>
-            <ol className="space-y-3">
-              {d.review.map((r, i) => (
-                <li key={i} className="flex gap-3">
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{i + 1}</span>
-                  <p className="pt-0.5 leading-relaxed">{r}</p>
-                </li>
-              ))}
-            </ol>
-          </Highlightable>
+          <RevisaoTab topicId={id} review={d.review} maskMode={maskMode} />
         </TabsContent>
       </Tabs>
     </main>
