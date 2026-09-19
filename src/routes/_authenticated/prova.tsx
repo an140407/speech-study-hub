@@ -92,6 +92,8 @@ function ExamPage() {
     }
     setQuestions(picked);
     setAnswers(picked.map(() => null));
+    setSeconds(picked.map(() => 0));
+    setTotalSeconds(0);
     setCurrent(0);
     setStage("running");
   }
@@ -104,9 +106,26 @@ function ExamPage() {
       answers,
       score,
       total: questions.length,
+      question_seconds: seconds,
+      total_seconds: totalSeconds,
     });
     if (error) console.error(error);
   }
+
+  const bySubtopic = (() => {
+    const map: Record<string, { total: number; ok: number }> = {};
+    questions.forEach((q, i) => {
+      const key = q.subtopic?.trim() || "Sem sub-tópico";
+      const e = (map[key] ??= { total: 0, ok: 0 });
+      e.total++;
+      if (answers[i] === q.correct_index) e.ok++;
+    });
+    return Object.entries(map).map(([subtopic, v]) => ({
+      subtopic,
+      pct: Math.round((v.ok / v.total) * 100),
+      label: `${v.ok}/${v.total}`,
+    }));
+  })();
 
   const score = questions.reduce((acc, q, i) => acc + (answers[i] === q.correct_index ? 1 : 0), 0);
 
