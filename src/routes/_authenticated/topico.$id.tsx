@@ -77,6 +77,22 @@ function TopicPage() {
   const { id } = Route.useParams();
   const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
   const [maskMode, setMaskMode] = useState(true);
+  const queryClient = useQueryClient();
+  const backfill = useServerFn(backfillSubtopics);
+  const backfilled = useRef(false);
+
+  // Classifica em segundo plano flashcards/questões antigos sem sub-tópico.
+  useEffect(() => {
+    const d = q.data;
+    if (!d || backfilled.current) return;
+    const missing = d.flashcards.some((f) => !f.subtopic) || d.mcq.some((m) => !m.subtopic);
+    if (!missing) return;
+    backfilled.current = true;
+    backfill({ data: { topic_id: id } })
+      .then((r) => { if (r.updated) queryClient.invalidateQueries({ queryKey: ["topic", id] }); })
+      .catch(() => undefined);
+  }, [q.data, backfill, id, queryClient]);
+
 
   if (q.isLoading) {
     return (
