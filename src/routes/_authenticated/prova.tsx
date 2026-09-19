@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, BarChart3, CheckCircle2, Clock, GraduationCap, RotateCcw, X, XCircle } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { generateMoreMcq } from "@/lib/study-extra.functions";
 import type { McqRow } from "@/lib/study-types";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -56,6 +58,7 @@ function ExamPage() {
   const [building, setBuilding] = useState(false);
   const [seconds, setSeconds] = useState<number[]>([]);
   const [totalSeconds, setTotalSeconds] = useState(0);
+  const generateMore = useServerFn(generateMoreMcq);
 
   // Cronômetro: conta o tempo na questão atual e o tempo total (sem limite).
   useEffect(() => {
@@ -80,22 +83,79 @@ function ExamPage() {
   async function startExam() {
     if (selected.length === 0) { toast.error("Escolha pelo menos um tópico."); return; }
     setBuilding(true);
-    const { data, error } = await supabase
-      .from("mcq_questions")
-      .select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at")
-      .in("topic_id", selected);
-    setBuilding(false);
-    if (error || !data?.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
-    const picked = shuffle(data as unknown as McqRow[]).slice(0, size);
-    if (picked.length < size) {
-      toast.info(`Só há ${picked.length} questões disponíveis nesses tópicos — a prova terá ${picked.length} questões.`);
+    try {
+      const fetchPool = async () => {
+        const { data, error } = await supabase
+          .from("mcq_questions")
+          .select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at")
+          .in("topic_id", selected);
+        if (error) throw error;
+        return (data ?? []) as unknown as McqRow[];
+      };
+
+      let pool = await fetchPool();
+      let unseen = pool.filter((q) => !q.seen_at);
+
+      // Se não tem não-vistas suficientes, gera questões novas (evita repetir o que já foi praticado).
+      if (unseen.length < size) {
+        const needed = size - unseen.length;
+        const countByTopic = new Map<string, number>();
+        for (const q of pool) countByTopic.set(q.topic_id, (countByTopic.get(q.topic_id) ?? 0) + 1);
+
+        let remaining = needed;
+        const asks: { topic_id: string; count: number }[] = [];
+        for (const topicId of selected) {
+          if (remaining <= 0) break;
+          const room = Math.max(0, 50 - (countByTopic.get(topicId) ?? 0));
+          const take = Math.min(room, remaining, 20);
+          if (take > 0) {
+            asks.push({ topic_id: topicId, count: take });
+            remaining -= take;
+          }
+        }
+
+        if (asks.length) {
+          toast.info(`Gerando ${needed - remaining} questões novas pra evitar repetir a prática…`);
+          for (const a of asks) {
+            try {
+              await generateMore({ data: a });
+            } catch (e) {
+              console.error("Falha ao gerar questões extras pra prova", e);
+            }
+          }
+          pool = await fetchPool();
+          unseen = pool.filter((q) => !q.seen_at);
+        }
+      }
+
+      let picked: McqRow[];
+      if (unseen.length >= size) {
+        picked = shuffle(unseen).slice(0, size);
+      } else {
+        const seenPool = pool.filter((q) => q.seen_at);
+        const extra = shuffle(seenPool).slice(0, size - unseen.length);
+        picked = shuffle([...unseen, ...extra]);
+        if (extra.length > 0) {
+          toast.info(`Não foi possível gerar todas as questões novas (limite do tópico) — ${extra.length} já praticada(s) foram incluídas pra completar.`);
+        }
+      }
+
+      if (!picked.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
+      if (picked.length < size) {
+        toast.info(`Só há ${picked.length} questões disponíveis nesses tópicos — a prova terá ${picked.length} questões.`);
+      }
+
+      setQuestions(picked);
+      setAnswers(picked.map(() => null));
+      setSeconds(picked.map(() => 0));
+      setTotalSeconds(0);
+      setCurrent(0);
+      setStage("running");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao montar a prova.");
+    } finally {
+      setBuilding(false);
     }
-    setQuestions(picked);
-    setAnswers(picked.map(() => null));
-    setSeconds(picked.map(() => 0));
-    setTotalSeconds(0);
-    setCurrent(0);
-    setStage("running");
   }
 
   async function finishExam() {
