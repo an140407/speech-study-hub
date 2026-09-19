@@ -38,6 +38,14 @@ function shuffle<T>(arr: T[]): T[] {
 
 type Stage = "setup" | "running" | "result";
 
+const SLOW_SECONDS = 180;
+
+function fmt(s: number) {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+
 function ExamPage() {
   const [stage, setStage] = useState<Stage>("setup");
   const [selected, setSelected] = useState<string[]>([]);
