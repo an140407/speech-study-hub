@@ -276,11 +276,37 @@ function ExamPage() {
             <p className="mt-2 font-serif text-6xl font-semibold text-primary">
               {score}<span className="text-2xl text-muted-foreground">/{questions.length}</span>
             </p>
-            <p className="mt-2 text-muted-foreground">{Math.round((score / questions.length) * 100)}% de acertos</p>
+            <p className="mt-2 text-muted-foreground">
+              {Math.round((score / questions.length) * 100)}% de acertos · tempo total {fmt(totalSeconds)}
+            </p>
             <Button variant="outline" className="mt-5" onClick={() => { setStage("setup"); setQuestions([]); }}>
               <RotateCcw className="size-4" /> Nova prova
             </Button>
           </div>
+
+          {bySubtopic.length > 0 && (
+            <div className="card-soft p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <BarChart3 className="size-5 text-primary" />
+                <h2 className="text-lg font-semibold">Desempenho por sub-tópico</h2>
+              </div>
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={bySubtopic} margin={{ top: 8, right: 8, bottom: 8, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                    <XAxis dataKey="subtopic" tick={{ fontSize: 11 }} interval={0} height={50} angle={-15} textAnchor="end" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+                    <Tooltip formatter={(v: number, _n, p) => [`${v}% (${p.payload.label})`, "Acertos"]} />
+                    <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
+                      {bySubtopic.map((d, i) => (
+                        <Cell key={i} fill={`var(--branch-${(i % 6) + 1})`} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {questions.map((q, i) => {
             const ok = answers[i] === q.correct_index;
@@ -288,7 +314,10 @@ function ExamPage() {
               <div key={q.id} className="card-soft p-5">
                 <div className="flex items-start gap-2">
                   {ok ? <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /> : <XCircle className="mt-0.5 size-5 shrink-0 text-destructive" />}
-                  <p className="font-medium">{i + 1}. {q.question}</p>
+                  <p className="flex-1 font-medium">{i + 1}. {q.question}</p>
+                  <span className={cn("shrink-0 text-xs tabular-nums text-muted-foreground", (seconds[i] ?? 0) >= SLOW_SECONDS && "text-destructive")}>
+                    {fmt(seconds[i] ?? 0)}
+                  </span>
                 </div>
                 <ul className="mt-3 space-y-1.5 text-sm">
                   {q.options.map((opt, j) => (
