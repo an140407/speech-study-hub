@@ -33,9 +33,9 @@ async function loadTopic(id: string) {
   const [topic, materials, flashcards, mcq, cases] = await Promise.all([
     supabase.from("topics").select("id, title, created_at").eq("id", id).single(),
     supabase.from("materials").select("type, content").eq("topic_id", id),
-    supabase.from("flashcards").select("id, topic_id, front, back, subtopic, seen_at").eq("topic_id", id).order("created_at"),
-    supabase.from("mcq_questions").select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at").eq("topic_id", id).order("created_at"),
-    supabase.from("clinical_cases").select("id, topic_id, scenario, guiding_questions, case_explanation, created_at").eq("topic_id", id).order("created_at"),
+    supabase.from("flashcards").select("id, topic_id, front, back, subtopic, seen_at").eq("topic_id", id).order("created_at").order("id"),
+    supabase.from("mcq_questions").select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at").eq("topic_id", id).order("created_at").order("id"),
+    supabase.from("clinical_cases").select("id, topic_id, scenario, guiding_questions, case_explanation, created_at").eq("topic_id", id).order("created_at").order("id"),
   ]);
   if (topic.error) throw topic.error;
   const byType = Object.fromEntries((materials.data ?? []).map((m) => [m.type, m.content])) as Record<string, unknown>;
