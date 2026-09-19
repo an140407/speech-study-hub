@@ -129,17 +129,13 @@ function TopicPage() {
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
         </TabsContent>
         <TabsContent value="flashcards" className="mt-4 animate-fade-up">
-          <Flashcards cards={d.flashcards} />
+          <Flashcards cards={d.flashcards} topicId={id} />
         </TabsContent>
         <TabsContent value="questoes" className="mt-4 animate-fade-up">
-          <McqPractice questions={d.mcq} />
+          <McqPractice questions={d.mcq} topicId={id} />
         </TabsContent>
         <TabsContent value="caso" className="mt-4 animate-fade-up">
-          {d.clinicalCase ? (
-            <ClinicalCase data={d.clinicalCase} topicId={id} maskMode={maskMode} />
-          ) : (
-            <p className="text-muted-foreground">Sem caso clínico.</p>
-          )}
+          <ClinicalCase cases={d.cases} topicId={id} maskMode={maskMode} />
         </TabsContent>
         <TabsContent value="revisao" className="card-soft mt-4 animate-fade-up p-6">
           <p className="mb-4 text-sm text-muted-foreground">Perguntas para reflexão — sem gabarito. Tente responder com suas palavras.</p>
