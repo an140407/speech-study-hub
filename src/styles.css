@@ -222,3 +222,13 @@
 .prose-study li { margin: 0.25em 0; }
 .prose-study strong { color: var(--color-foreground); font-weight: 600; }
 .prose-study > :first-child { margin-top: 0; }
+
+/* Grifo de texto (modo máscara) */
+mark.fono-highlight {
+  background-color: #fde047;
+  color: inherit;
+  border-radius: 0.15em;
+  padding: 0.05em 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

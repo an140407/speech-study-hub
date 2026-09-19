@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope } from "lucide-react";
+import { Highlighter, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCase as ClinicalCaseT, Flashcard, Mcq, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
@@ -9,6 +11,8 @@ import { Flashcards } from "@/components/study/Flashcards";
 import { McqPractice } from "@/components/study/McqPractice";
 import { MindMap } from "@/components/study/MindMap";
 import { ClinicalCase } from "@/components/study/ClinicalCase";
+import { Highlightable } from "@/components/study/Highlightable";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_authenticated/topico/$id")({
   head: () => ({
@@ -57,6 +61,7 @@ const TABS = [
 function TopicPage() {
   const { id } = Route.useParams();
   const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
+  const [maskMode, setMaskMode] = useState(true);
 
   if (q.isLoading) {
     return (
@@ -81,7 +86,19 @@ function TopicPage() {
       <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> Tópicos
       </Link>
-      <h1 className="mt-2 text-3xl font-semibold leading-tight md:text-4xl">{d.topic.title}</h1>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <h1 className="text-3xl font-semibold leading-tight md:text-4xl">{d.topic.title}</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 gap-1.5"
+          onClick={() => setMaskMode((v) => !v)}
+          title={maskMode ? "Esconder grifos (modo máscara)" : "Mostrar grifos"}
+        >
+          {maskMode ? <Highlighter className="size-4" /> : <EyeOff className="size-4" />}
+          {maskMode ? "Grifos visíveis" : "Grifos escondidos"}
+        </Button>
+      </div>
 
       <Tabs defaultValue="resumo" className="mt-6">
         <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-card p-1 shadow-soft">
@@ -93,7 +110,9 @@ function TopicPage() {
         </TabsList>
 
         <TabsContent value="resumo" className="card-soft mt-4 animate-fade-up p-6 md:p-8">
-          <SimpleMarkdown text={d.summary} />
+          <Highlightable topicId={id} contentType="resumo" maskMode={maskMode}>
+            <SimpleMarkdown text={d.summary} />
+          </Highlightable>
         </TabsContent>
         <TabsContent value="mapa" className="mt-4 animate-fade-up">
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
@@ -105,18 +124,26 @@ function TopicPage() {
           <McqPractice questions={d.mcq} />
         </TabsContent>
         <TabsContent value="caso" className="mt-4 animate-fade-up">
-          {d.clinicalCase ? <ClinicalCase data={d.clinicalCase} /> : <p className="text-muted-foreground">Sem caso clínico.</p>}
+          {d.clinicalCase ? (
+            <Highlightable topicId={id} contentType="caso_clinico" caseId={d.clinicalCase.id} maskMode={maskMode}>
+              <ClinicalCase data={d.clinicalCase} />
+            </Highlightable>
+          ) : (
+            <p className="text-muted-foreground">Sem caso clínico.</p>
+          )}
         </TabsContent>
         <TabsContent value="revisao" className="card-soft mt-4 animate-fade-up p-6">
           <p className="mb-4 text-sm text-muted-foreground">Perguntas para reflexão — sem gabarito. Tente responder com suas palavras.</p>
-          <ol className="space-y-3">
-            {d.review.map((r, i) => (
-              <li key={i} className="flex gap-3">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{i + 1}</span>
-                <p className="pt-0.5 leading-relaxed">{r}</p>
-              </li>
-            ))}
-          </ol>
+          <Highlightable topicId={id} contentType="revisao" maskMode={maskMode}>
+            <ol className="space-y-3">
+              {d.review.map((r, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{i + 1}</span>
+                  <p className="pt-0.5 leading-relaxed">{r}</p>
+                </li>
+              ))}
+            </ol>
+          </Highlightable>
         </TabsContent>
       </Tabs>
     </main>
