@@ -54,6 +54,19 @@ function ExamPage() {
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [current, setCurrent] = useState(0);
   const [building, setBuilding] = useState(false);
+  const [seconds, setSeconds] = useState<number[]>([]);
+  const [totalSeconds, setTotalSeconds] = useState(0);
+
+  // Cronômetro: conta o tempo na questão atual e o tempo total (sem limite).
+  useEffect(() => {
+    if (stage !== "running") return;
+    const t = setInterval(() => {
+      setTotalSeconds((v) => v + 1);
+      setSeconds((arr) => arr.map((v, i) => (i === current ? v + 1 : v)));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [stage, current]);
+
 
   const topics = useQuery({
     queryKey: ["topics"],
