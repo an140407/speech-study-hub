@@ -58,15 +58,13 @@ const TABS = [
 ];
 
 function RevisaoTab({ topicId, review, maskMode }: { topicId: string; review: string[]; maskMode: boolean }) {
-  const { rangesFor, onSelect } = useHighlights(topicId, "revisao", undefined, maskMode);
+  const { rangesFor, onSelect, onRemove } = useHighlights(topicId, "revisao", undefined, maskMode);
   return (
     <ol className="space-y-3">
       {review.map((r, i) => (
         <li key={i} className="flex gap-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">{i + 1}</span>
-          <p className="pt-0.5 leading-relaxed">
-            <HighlightableBlock blockIndex={i} text={r} ranges={rangesFor(i)} onSelect={onSelect} />
-          </p>
+          <HighlightableBlock as="p" className="pt-0.5 leading-relaxed" blockIndex={i} text={r} ranges={rangesFor(i)} onSelect={onSelect} onRemove={onRemove} />
         </li>
       ))}
     </ol>

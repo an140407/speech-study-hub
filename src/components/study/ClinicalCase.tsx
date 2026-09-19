@@ -7,7 +7,7 @@ import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 export function ClinicalCase({ data, topicId, maskMode }: { data: ClinicalCaseT; topicId: string; maskMode: boolean }) {
   const [revealed, setRevealed] = useState(0);
   const total = data.guiding_questions.length;
-  const { rangesFor, onSelect } = useHighlights(topicId, "caso_clinico", data.id, maskMode);
+  const { rangesFor, onSelect, onRemove } = useHighlights(topicId, "caso_clinico", data.id, maskMode);
   // Bloco 0 = cenário; blocos 1..N = cada pergunta guiada.
   return (
     <div className="space-y-4">
@@ -16,9 +16,7 @@ export function ClinicalCase({ data, topicId, maskMode }: { data: ClinicalCaseT;
           <Stethoscope className="size-5" />
           <h3 className="text-lg font-semibold">Cenário clínico</h3>
         </div>
-        <p className="whitespace-pre-line leading-relaxed">
-          <HighlightableBlock blockIndex={0} text={data.scenario} ranges={rangesFor(0)} onSelect={onSelect} />
-        </p>
+        <HighlightableBlock as="p" className="whitespace-pre-line leading-relaxed" blockIndex={0} text={data.scenario} ranges={rangesFor(0)} onSelect={onSelect} onRemove={onRemove} />
       </div>
       <div>
         <h3 className="mb-2 text-lg font-semibold">Perguntas guiadas</h3>
@@ -26,9 +24,7 @@ export function ClinicalCase({ data, topicId, maskMode }: { data: ClinicalCaseT;
           {data.guiding_questions.slice(0, revealed).map((q, i) => (
             <li key={i} className="card-soft animate-fade-up flex gap-3 p-4">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">{i + 1}</span>
-              <p className="pt-0.5 leading-relaxed">
-                <HighlightableBlock blockIndex={i + 1} text={q.question} ranges={rangesFor(i + 1)} onSelect={onSelect} />
-              </p>
+              <HighlightableBlock as="p" className="pt-0.5 leading-relaxed" blockIndex={i + 1} text={q.question} ranges={rangesFor(i + 1)} onSelect={onSelect} onRemove={onRemove} />
             </li>
           ))}
         </ol>

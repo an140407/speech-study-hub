@@ -4,7 +4,7 @@ import { HighlightableBlock, useHighlights } from "./highlight";
 /** Tiny markdown renderer: headings, bullet/numbered lists, bold, paragraphs.
  *  Parágrafos e itens de lista são grifáveis (por bloco); títulos não são. */
 export function SimpleMarkdown({ text, topicId, maskMode }: { text: string; topicId: string; maskMode: boolean }) {
-  const { rangesFor, onSelect } = useHighlights(topicId, "resumo", undefined, maskMode);
+  const { rangesFor, onSelect, onRemove } = useHighlights(topicId, "resumo", undefined, maskMode);
 
   const lines = text.replace(/\r/g, "").split("\n");
   const out: ReactNode[] = [];
@@ -20,11 +20,7 @@ export function SimpleMarkdown({ text, topicId, maskMode }: { text: string; topi
       <Tag key={k++}>
         {list.items.map((it) => {
           const bi = blockIndex++;
-          return (
-            <li key={bi}>
-              <HighlightableBlock blockIndex={bi} text={it} ranges={rangesFor(bi)} onSelect={onSelect} />
-            </li>
-          );
+          return <HighlightableBlock key={bi} as="li" blockIndex={bi} text={it} ranges={rangesFor(bi)} onSelect={onSelect} onRemove={onRemove} />;
         })}
       </Tag>,
     );
@@ -34,11 +30,7 @@ export function SimpleMarkdown({ text, topicId, maskMode }: { text: string; topi
     if (para.length === 0) return;
     const bi = blockIndex++;
     const text = para.join(" ");
-    out.push(
-      <p key={k++}>
-        <HighlightableBlock blockIndex={bi} text={text} ranges={rangesFor(bi)} onSelect={onSelect} />
-      </p>,
-    );
+    out.push(<HighlightableBlock key={k++} as="p" blockIndex={bi} text={text} ranges={rangesFor(bi)} onSelect={onSelect} onRemove={onRemove} />);
     para = [];
   };
 

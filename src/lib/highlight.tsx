@@ -14,7 +14,12 @@ export function overlapsExisting(start: number, end: number, existing: { start: 
  * Renderiza um texto (com **negrito** opcional) já com os grifos aplicados por cima —
  * tudo calculado como dado puro e devolvido como React nodes. Nenhuma manipulação de DOM.
  */
-export function renderHighlighted(text: string, ranges: HighlightRange[], keyPrefix: string): ReactNode {
+export function renderHighlighted(
+  text: string,
+  ranges: HighlightRange[],
+  keyPrefix: string,
+  onRemove?: (id: string) => void,
+): ReactNode {
   type Seg = { text: string; bold: boolean; offset: number };
   const segs: Seg[] = [];
   let offset = 0;
@@ -48,10 +53,25 @@ export function renderHighlighted(text: string, ranges: HighlightRange[], keyPre
     const seg = segs.find((s) => start >= s.offset && end <= s.offset + s.text.length);
     if (!seg) continue;
     const chunk = seg.text.slice(start - seg.offset, end - seg.offset);
-    const highlighted = ranges.some((r) => start < r.end && end > r.start);
+    const match = ranges.find((r) => start < r.end && end > r.start);
     let node: ReactNode = chunk;
     if (seg.bold) node = <strong key={`${keyPrefix}-b-${i}`}>{node}</strong>;
-    if (highlighted) node = <mark key={`${keyPrefix}-m-${i}`} className="fono-highlight">{node}</mark>;
+    if (match) {
+      const id = match.id;
+      node = (
+        <mark
+          key={`${keyPrefix}-m-${i}`}
+          className="fono-highlight cursor-pointer"
+          title="Clique para remover o grifo"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove?.(id);
+          }}
+        >
+          {node}
+        </mark>
+      );
+    }
     nodes.push(<span key={`${keyPrefix}-${i}`}>{node}</span>);
   }
   return nodes;
@@ -111,6 +131,14 @@ export function useHighlights(topicId: string, contentType: ContentType, caseId:
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
   });
 
+  const remove = useMutation({
+    mutationFn: async (highlightId: string) => {
+      const { error } = await supabase.from("highlights").delete().eq("id", highlightId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  });
+
   function rangesFor(blockIndex: number): HighlightRange[] {
     if (!maskMode) return [];
     return (query.data ?? [])
@@ -132,22 +160,30 @@ export function useHighlights(topicId: string, contentType: ContentType, caseId:
     add.mutate({ blockIndex, ...offsets });
   }
 
-  return { rangesFor, onSelect };
+  return { rangesFor, onSelect, onRemove: (id: string) => remove.mutate(id) };
 }
 
-/** Um parágrafo/item/pergunta grifável: renderiza o texto (com grifos) e captura seleção. */
+/** Um parágrafo/item/pergunta grifável: renderiza o texto (com grifos) e captura seleção.
+ *  O gatilho fica no próprio elemento de bloco (p/li), cobrindo toda a área — não num
+ *  <span> interno, que deixaria um vão nas entrelinhas onde soltar o mouse não faz nada. */
 export function HighlightableBlock({
+  as = "p",
   blockIndex,
   text,
   ranges,
   onSelect,
+  onRemove,
+  className,
 }: {
+  as?: "p" | "li";
   blockIndex: number;
   text: string;
   ranges: HighlightRange[];
   onSelect: (blockIndex: number, offsets: { start: number; end: number }) => void;
+  onRemove?: (id: string) => void;
+  className?: string;
 }) {
-  const ref = useRef<HTMLSpanElement>(null);
+  const ref = useRef<HTMLElement>(null);
   function handleMouseUp() {
     if (!ref.current) return;
     const offsets = getBlockSelectionOffsets(ref.current);
@@ -155,9 +191,17 @@ export function HighlightableBlock({
     if (!offsets) return;
     onSelect(blockIndex, offsets);
   }
+  const content = renderHighlighted(text, ranges, `b${blockIndex}`, onRemove);
+  if (as === "li") {
+    return (
+      <li ref={ref as React.RefObject<HTMLLIElement>} onMouseUp={handleMouseUp} className={className}>
+        {content}
+      </li>
+    );
+  }
   return (
-    <span ref={ref} onMouseUp={handleMouseUp}>
-      {renderHighlighted(text, ranges, `b${blockIndex}`)}
-    </span>
+    <p ref={ref as React.RefObject<HTMLParagraphElement>} onMouseUp={handleMouseUp} className={className}>
+      {content}
+    </p>
   );
 }
