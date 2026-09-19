@@ -143,9 +143,17 @@ function Index() {
       </section>
 
       <section className="mt-16">
-        <div className="mb-4 flex items-center gap-2">
-          <BookOpen className="size-5 text-primary" />
-          <h2 className="text-2xl font-semibold">Tópicos estudados</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BookOpen className="size-5 text-primary" />
+            <h2 className="text-2xl font-semibold">Tópicos estudados</h2>
+          </div>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar tópico…"
+            className="h-10 w-full rounded-xl bg-card shadow-soft sm:w-64"
+          />
         </div>
         {topics.isLoading ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -155,22 +163,36 @@ function Index() {
           <div className="card-soft p-8 text-center text-muted-foreground">
             Nenhum tópico ainda. Gere o seu primeiro material acima.
           </div>
+        ) : !filtered.length ? (
+          <div className="card-soft p-8 text-center text-muted-foreground">
+            Nenhum tópico encontrado para “{search}”.
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {topics.data.map((t, i) => (
-              <Link
-                key={t.id}
-                to="/topico/$id"
-                params={{ id: t.id }}
-                className="card-soft group animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
-                style={{ animationDelay: `${i * 40}ms` }}
-              >
-                <h3 className="text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
-                </p>
-              </Link>
-            ))}
+            {filtered.map((t, i) => {
+              const p = progress.data?.[t.id];
+              return (
+                <Link
+                  key={t.id}
+                  to="/topico/$id"
+                  params={{ id: t.id }}
+                  className="card-soft group animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
+                  style={{ animationDelay: `${i * 40}ms` }}
+                >
+                  <h3 className="text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+                  </p>
+                  {p && (
+                    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                      <p>{p.fcSeen} de {p.fcTotal} flashcards revisados</p>
+                      <p>{p.mcSeen} de {p.mcTotal} questões revisadas</p>
+                      <p>{p.exams} {p.exams === 1 ? "prova feita" : "provas feitas"}</p>
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>
