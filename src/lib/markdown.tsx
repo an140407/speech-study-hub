@@ -52,7 +52,16 @@ export function SimpleMarkdown({ text, topicId, maskMode }: { text: string; topi
       flushPara();
       const lvl = h[1]!.length;
       const content = h[2]!.replace(/\*\*/g, "");
-      out.push(lvl === 1 ? <h1 key={k++}>{content}</h1> : lvl === 2 ? <h2 key={k++}>{content}</h2> : <h3 key={k++}>{content}</h3>);
+      const clearSel = () => window.getSelection()?.removeAllRanges();
+      out.push(
+        lvl === 1 ? (
+          <h1 key={k++} onMouseUp={clearSel}>{content}</h1>
+        ) : lvl === 2 ? (
+          <h2 key={k++} onMouseUp={clearSel}>{content}</h2>
+        ) : (
+          <h3 key={k++} onMouseUp={clearSel}>{content}</h3>
+        ),
+      );
     } else if (ul || ol) {
       flushPara();
       const type = ul ? "ul" : "ol";
