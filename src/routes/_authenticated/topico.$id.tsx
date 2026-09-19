@@ -25,11 +25,12 @@ export const Route = createFileRoute("/_authenticated/topico/$id")({
 });
 
 async function loadTopic(id: string) {
-  const [topic, materials, flashcards, mcq] = await Promise.all([
+  const [topic, materials, flashcards, mcq, cases] = await Promise.all([
     supabase.from("topics").select("id, title, created_at").eq("id", id).single(),
     supabase.from("materials").select("type, content").eq("topic_id", id),
     supabase.from("flashcards").select("front, back").eq("topic_id", id).order("created_at"),
     supabase.from("mcq_questions").select("question, options, correct_index, explanation").eq("topic_id", id).order("created_at"),
+    supabase.from("clinical_cases").select("id, scenario, guiding_questions, case_explanation").eq("topic_id", id).order("created_at").limit(1),
   ]);
   if (topic.error) throw topic.error;
   const byType = Object.fromEntries((materials.data ?? []).map((m) => [m.type, m.content])) as Record<string, unknown>;
@@ -37,7 +38,7 @@ async function loadTopic(id: string) {
     topic: topic.data,
     summary: (byType["summary"] as { text?: string } | undefined)?.text ?? "",
     mindmap: (byType["mindmap"] as Mindmap | undefined) ?? null,
-    clinicalCase: (byType["clinical_case"] as ClinicalCaseT | undefined) ?? null,
+    clinicalCase: (cases.data?.[0] as ClinicalCaseT | undefined) ?? null,
     review: (byType["review_questions"] as { items?: string[] } | undefined)?.items ?? [],
     flashcards: (flashcards.data ?? []) as Flashcard[],
     mcq: (mcq.data ?? []) as unknown as Mcq[],

@@ -5,12 +5,16 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
 {
   "summary": "string em markdown simples (use ## para seções, listas com -, **negrito**); 400 a 700 palavras",
   "mindmap": { "topic": "string", "branches": [{ "title": "string", "children": ["string"] }] },
-  "flashcards": [{ "front": "string", "back": "string" }],
-  "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string" }],
-  "clinical_case": { "scenario": "string", "guiding_questions": ["string"] },
+  "flashcards": [{ "front": "string", "back": "string", "subtopic": "string (deve ser igual ao title de um dos branches do mindmap)" }],
+  "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string", "subtopic": "string (igual ao title de um dos branches do mindmap)" }],
+  "clinical_case": {
+    "scenario": "string",
+    "guiding_questions": [{ "question": "string", "answer": "string (resposta completa e correta da pergunta guiada)" }],
+    "case_explanation": "string (explicação geral de todo o caso: raciocínio clínico, o que o quadro sugere, e conduta esperada; 100 a 200 palavras)"
+  },
   "review_questions": ["string"]
 }
-Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; flashcards de 8 a 12; mcq de 5 a 8 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 4 a 6 guiding_questions; review_questions de 5 a 8.`;
+Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 4 a 6 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.`;
 
 function extractJson(raw: string): string {
   let text = raw.trim();
@@ -30,6 +34,12 @@ function validate(data: unknown): GeneratedMaterial {
   if (!Array.isArray(d.mcq) || d.mcq.length === 0) throw new Error("JSON sem 'mcq'.");
   if (!d.clinical_case || typeof d.clinical_case.scenario !== "string") throw new Error("JSON sem 'clinical_case'.");
   if (!Array.isArray(d.review_questions)) throw new Error("JSON sem 'review_questions'.");
+
+  const branchTitles = d.mindmap.branches.map((b) => String(b.title));
+  const fallbackSubtopic = branchTitles[0] ?? "Geral";
+  const normalizeSubtopic = (s: unknown) =>
+    typeof s === "string" && branchTitles.includes(s) ? s : fallbackSubtopic;
+
   const mcq = d.mcq
     .filter((q) => Array.isArray(q.options) && q.options.length === 4)
     .map((q) => ({
@@ -37,7 +47,18 @@ function validate(data: unknown): GeneratedMaterial {
       options: q.options.map(String),
       correct_index: Math.min(3, Math.max(0, Number(q.correct_index) || 0)),
       explanation: String(q.explanation ?? ""),
+      subtopic: normalizeSubtopic((q as { subtopic?: unknown }).subtopic),
     }));
+
+  const guidingQuestionsRaw = d.clinical_case.guiding_questions as unknown;
+  const guiding_questions = Array.isArray(guidingQuestionsRaw)
+    ? guidingQuestionsRaw.map((g) => {
+        if (typeof g === "string") return { question: g, answer: "" };
+        const go = g as { question?: unknown; answer?: unknown };
+        return { question: String(go.question ?? ""), answer: String(go.answer ?? "") };
+      })
+    : [];
+
   return {
     summary: d.summary,
     mindmap: {
@@ -47,13 +68,16 @@ function validate(data: unknown): GeneratedMaterial {
         children: Array.isArray(b.children) ? b.children.map(String) : [],
       })),
     },
-    flashcards: d.flashcards.map((f) => ({ front: String(f.front), back: String(f.back) })),
+    flashcards: d.flashcards.map((f) => ({
+      front: String(f.front),
+      back: String(f.back),
+      subtopic: normalizeSubtopic((f as { subtopic?: unknown }).subtopic),
+    })),
     mcq,
     clinical_case: {
       scenario: d.clinical_case.scenario,
-      guiding_questions: Array.isArray(d.clinical_case.guiding_questions)
-        ? d.clinical_case.guiding_questions.map(String)
-        : [],
+      guiding_questions,
+      case_explanation: String((d.clinical_case as { case_explanation?: unknown }).case_explanation ?? ""),
     },
     review_questions: d.review_questions.map(String),
   };
@@ -143,27 +167,45 @@ const JSON_SCHEMA = {
     },
     flashcards: {
       type: "array",
-      items: { type: "object", additionalProperties: false, required: ["front", "back"], properties: { front: { type: "string" }, back: { type: "string" } } },
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["front", "back", "subtopic"],
+        properties: { front: { type: "string" }, back: { type: "string" }, subtopic: { type: "string" } },
+      },
     },
     mcq: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["question", "options", "correct_index", "explanation"],
+        required: ["question", "options", "correct_index", "explanation", "subtopic"],
         properties: {
           question: { type: "string" },
           options: { type: "array", items: { type: "string" } },
           correct_index: { type: "integer" },
           explanation: { type: "string" },
+          subtopic: { type: "string" },
         },
       },
     },
     clinical_case: {
       type: "object",
       additionalProperties: false,
-      required: ["scenario", "guiding_questions"],
-      properties: { scenario: { type: "string" }, guiding_questions: { type: "array", items: { type: "string" } } },
+      required: ["scenario", "guiding_questions", "case_explanation"],
+      properties: {
+        scenario: { type: "string" },
+        guiding_questions: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["question", "answer"],
+            properties: { question: { type: "string" }, answer: { type: "string" } },
+          },
+        },
+        case_explanation: { type: "string" },
+      },
     },
     review_questions: { type: "array", items: { type: "string" } },
   },

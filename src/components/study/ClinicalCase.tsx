@@ -21,7 +21,7 @@ export function ClinicalCase({ data }: { data: ClinicalCaseT }) {
           {data.guiding_questions.slice(0, revealed).map((q, i) => (
             <li key={i} className="card-soft animate-fade-up flex gap-3 p-4">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">{i + 1}</span>
-              <p className="pt-0.5 leading-relaxed">{q}</p>
+              <p className="pt-0.5 leading-relaxed">{q.question}</p>
             </li>
           ))}
         </ol>

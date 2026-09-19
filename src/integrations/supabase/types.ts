@@ -22,6 +22,8 @@ export type Database = {
           question_ids: Json
           score: number
           total: number
+          question_seconds: Json | null
+          total_seconds: number | null
           user_id: string | null
         }
         Insert: {
@@ -31,6 +33,8 @@ export type Database = {
           question_ids: Json
           score: number
           total: number
+          question_seconds?: Json | null
+          total_seconds?: number | null
           user_id?: string | null
         }
         Update: {
@@ -40,6 +44,8 @@ export type Database = {
           question_ids?: Json
           score?: number
           total?: number
+          question_seconds?: Json | null
+          total_seconds?: number | null
           user_id?: string | null
         }
         Relationships: []
@@ -51,6 +57,8 @@ export type Database = {
           front: string
           id: string
           topic_id: string
+          subtopic: string | null
+          seen_at: string | null
         }
         Insert: {
           back: string
@@ -58,6 +66,8 @@ export type Database = {
           front: string
           id?: string
           topic_id: string
+          subtopic?: string | null
+          seen_at?: string | null
         }
         Update: {
           back?: string
@@ -65,6 +75,8 @@ export type Database = {
           front?: string
           id?: string
           topic_id?: string
+          subtopic?: string | null
+          seen_at?: string | null
         }
         Relationships: [
           {
@@ -117,6 +129,9 @@ export type Database = {
           options: Json
           question: string
           topic_id: string
+          subtopic: string | null
+          seen_at: string | null
+          ai_explanation: string | null
         }
         Insert: {
           correct_index: number
@@ -126,6 +141,9 @@ export type Database = {
           options: Json
           question: string
           topic_id: string
+          subtopic?: string | null
+          seen_at?: string | null
+          ai_explanation?: string | null
         }
         Update: {
           correct_index?: number
@@ -135,6 +153,9 @@ export type Database = {
           options?: Json
           question?: string
           topic_id?: string
+          subtopic?: string | null
+          seen_at?: string | null
+          ai_explanation?: string | null
         }
         Relationships: [
           {
@@ -142,6 +163,86 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clinical_cases: {
+        Row: {
+          id: string
+          topic_id: string
+          scenario: string
+          guiding_questions: Json
+          case_explanation: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          topic_id: string
+          scenario: string
+          guiding_questions: Json
+          case_explanation?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          topic_id?: string
+          scenario?: string
+          guiding_questions?: Json
+          case_explanation?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clinical_cases_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      highlights: {
+        Row: {
+          id: string
+          topic_id: string
+          content_type: string
+          case_id: string | null
+          start_offset: number
+          end_offset: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          topic_id: string
+          content_type: string
+          case_id?: string | null
+          start_offset: number
+          end_offset: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          topic_id?: string
+          content_type?: string
+          case_id?: string | null
+          start_offset?: number
+          end_offset?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "highlights_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "highlights_case_id_fkey"
+            columns: ["case_id"]
+            isOneToOne: false
+            referencedRelation: "clinical_cases"
             referencedColumns: ["id"]
           },
         ]
@@ -183,6 +284,47 @@ export type Database = {
           p_topic: string
         }
         Returns: string
+      }
+      add_flashcards: {
+        Args: { p_topic_id: string; p_flashcards: Json }
+        Returns: number
+      }
+      add_mcq_questions: {
+        Args: { p_topic_id: string; p_mcq: Json }
+        Returns: number
+      }
+      add_clinical_case: {
+        Args: {
+          p_topic_id: string
+          p_scenario: string
+          p_guiding_questions: Json
+          p_case_explanation: string
+        }
+        Returns: string
+      }
+      update_clinical_case_content: {
+        Args: { p_case_id: string; p_guiding_questions: Json; p_case_explanation: string }
+        Returns: undefined
+      }
+      set_mcq_explanation: {
+        Args: { p_mcq_id: string; p_ai_explanation: string }
+        Returns: undefined
+      }
+      set_flashcard_subtopic: {
+        Args: { p_flashcard_id: string; p_subtopic: string }
+        Returns: undefined
+      }
+      set_mcq_subtopic: {
+        Args: { p_mcq_id: string; p_subtopic: string }
+        Returns: undefined
+      }
+      mark_flashcard_seen: {
+        Args: { p_flashcard_id: string }
+        Returns: undefined
+      }
+      mark_mcq_seen: {
+        Args: { p_mcq_id: string }
+        Returns: undefined
       }
     }
     Enums: {
