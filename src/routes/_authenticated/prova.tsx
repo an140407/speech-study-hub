@@ -290,14 +290,14 @@ function ExamPage() {
                 <BarChart3 className="size-5 text-primary" />
                 <h2 className="text-lg font-semibold">Desempenho por sub-tópico</h2>
               </div>
-              <div className="h-64 w-full">
+              <div className="w-full" style={{ height: Math.max(220, bySubtopic.length * 48) }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={bySubtopic} margin={{ top: 8, right: 8, bottom: 8, left: -20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                    <XAxis dataKey="subtopic" tick={{ fontSize: 11 }} interval={0} height={50} angle={-15} textAnchor="end" />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+                  <BarChart data={bySubtopic} layout="vertical" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+                    <YAxis type="category" dataKey="subtopic" tick={{ fontSize: 12 }} width={150} />
                     <Tooltip formatter={(v: number, _n, p) => [`${v}% (${p.payload.label})`, "Acertos"]} />
-                    <Bar dataKey="pct" radius={[6, 6, 0, 0]}>
+                    <Bar dataKey="pct" radius={[0, 6, 6, 0]} barSize={22}>
                       {bySubtopic.map((d, i) => (
                         <Cell key={i} fill={`var(--branch-${(i % 6) + 1})`} />
                       ))}
