@@ -32,6 +32,8 @@ function Index() {
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
 
+  const [search, setSearch] = useState("");
+
   const topics = useQuery({
     queryKey: ["topics"],
     queryFn: async () => {
@@ -43,6 +45,39 @@ function Index() {
       return data;
     },
   });
+
+  const progress = useQuery({
+    queryKey: ["topics-progress"],
+    queryFn: async () => {
+      const [fc, mc, exams] = await Promise.all([
+        supabase.from("flashcards").select("topic_id, seen_at"),
+        supabase.from("mcq_questions").select("id, topic_id, seen_at"),
+        supabase.from("exam_attempts").select("question_ids"),
+      ]);
+      const map: Record<string, { fcTotal: number; fcSeen: number; mcTotal: number; mcSeen: number; exams: number }> = {};
+      const get = (t: string) => (map[t] ??= { fcTotal: 0, fcSeen: 0, mcTotal: 0, mcSeen: 0, exams: 0 });
+      for (const f of fc.data ?? []) { const e = get(f.topic_id); e.fcTotal++; if (f.seen_at) e.fcSeen++; }
+      const topicOfQuestion: Record<string, string> = {};
+      for (const m of mc.data ?? []) {
+        topicOfQuestion[m.id] = m.topic_id;
+        const e = get(m.topic_id); e.mcTotal++; if (m.seen_at) e.mcSeen++;
+      }
+      for (const a of exams.data ?? []) {
+        const ids = (a.question_ids as unknown as string[]) ?? [];
+        const topicsOf = new Set(ids.map((qid) => topicOfQuestion[qid]));
+        if (ids.length > 0 && topicsOf.size === 1) {
+          const only = [...topicsOf][0];
+          if (only) get(only).exams++;
+        }
+      }
+      return map;
+    },
+  });
+
+  const filtered = (topics.data ?? []).filter((t) =>
+    t.title.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
 
   async function handleGenerate(e?: React.FormEvent) {
     e?.preventDefault();
