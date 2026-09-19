@@ -82,7 +82,7 @@ function ExamPage() {
     setBuilding(true);
     const { data, error } = await supabase
       .from("mcq_questions")
-      .select("id, topic_id, question, options, correct_index, explanation")
+      .select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at")
       .in("topic_id", selected);
     setBuilding(false);
     if (error || !data?.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
