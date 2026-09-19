@@ -4,9 +4,10 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { askJson, askText, PROFESSOR } from "./ai.server";
 import type { GuidingQA } from "./study-types";
 
-type Ctx = { supabase: { from: (t: string) => any; rpc: (fn: string, args: unknown) => any } };
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Db = any;
 
-async function topicContext(supabase: Ctx["supabase"], topicId: string) {
+async function topicContext(supabase: Db, topicId: string) {
   const [{ data: topic }, { data: materials }] = await Promise.all([
     supabase.from("topics").select("title").eq("id", topicId).single(),
     supabase.from("materials").select("type, content").eq("topic_id", topicId),
@@ -180,7 +181,7 @@ ${items.map((i) => `${i.id} :: ${i.text}`).join("\n")}`,
       const item = items.find((i) => i.id === r.id);
       const subtopic = branches.includes(String(r.subtopic)) ? String(r.subtopic) : branches[0]!;
       if (!item) continue;
-      const { error } = await context.supabase.rpc(
+      const { error } = await (context.supabase as Db).rpc(
         item.kind === "f" ? "set_flashcard_subtopic" : "set_mcq_subtopic",
         item.kind === "f"
           ? { p_flashcard_id: item.id, p_subtopic: subtopic }
@@ -231,7 +232,7 @@ Casos já existentes (crie um diferente destes): ${(existing ?? []).map((c: { sc
     return { case_id: caseId as string };
   });
 
-async function loadCase(supabase: Ctx["supabase"], caseId: string) {
+async function loadCase(supabase: Db, caseId: string) {
   const { data, error } = await supabase
     .from("clinical_cases")
     .select("id, scenario, guiding_questions, case_explanation")
