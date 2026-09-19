@@ -232,3 +232,13 @@ mark.fono-highlight {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+/* Esconde a barra de rolagem em telas de tablet/celular (rolagem continua funcionando) */
+@media (max-width: 1024px) {
+  html {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
+  }
+}
