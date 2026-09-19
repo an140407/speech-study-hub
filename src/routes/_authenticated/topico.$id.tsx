@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import type { ClinicalCase as ClinicalCaseT, Flashcard, Mcq, Mindmap } from "@/lib/study-types";
+import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
