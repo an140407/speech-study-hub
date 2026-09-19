@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, GraduationCap, RotateCcw, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, GraduationCap, RotateCcw, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import type { McqRow } from "@/lib/study-types";
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/_authenticated/prova")({
 });
 
 const LETTERS = ["A", "B", "C", "D"];
-const SIZES = [5, 10, 15];
+const SIZES = [10, 20, 30, 40, 50];
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -65,6 +65,9 @@ function ExamPage() {
     setBuilding(false);
     if (error || !data?.length) { toast.error("Não há questões para os tópicos escolhidos."); return; }
     const picked = shuffle(data as unknown as McqRow[]).slice(0, size);
+    if (picked.length < size) {
+      toast.info(`Só há ${picked.length} questões disponíveis nesses tópicos — a prova terá ${picked.length} questões.`);
+    }
     setQuestions(picked);
     setAnswers(picked.map(() => null));
     setCurrent(0);
@@ -84,6 +87,13 @@ function ExamPage() {
   }
 
   const score = questions.reduce((acc, q, i) => acc + (answers[i] === q.correct_index ? 1 : 0), 0);
+
+  function exitExam() {
+    const answered = answers.filter((a) => a !== null).length;
+    if (answered > 0 && !confirm("Sair agora descarta essa prova em andamento. Tem certeza?")) return;
+    setStage("setup");
+    setQuestions([]);
+  }
 
   return (
     <main className="mx-auto max-w-3xl px-4 pb-20 pt-8">
@@ -152,7 +162,12 @@ function ExamPage() {
         <div className="card-soft animate-fade-up p-6" key={current}>
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>Questão {current + 1} de {questions.length}</span>
-            <span>{answers.filter((a) => a !== null).length} respondidas</span>
+            <div className="flex items-center gap-3">
+              <span>{answers.filter((a) => a !== null).length} respondidas</span>
+              <button type="button" onClick={exitExam} className="flex items-center gap-1 text-muted-foreground hover:text-destructive">
+                <X className="size-3.5" /> Sair
+              </button>
+            </div>
           </div>
           <div className="mb-5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <div className="h-full bg-primary transition-all" style={{ width: `${((current + 1) / questions.length) * 100}%` }} />

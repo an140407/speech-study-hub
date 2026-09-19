@@ -14,7 +14,7 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
   },
   "review_questions": ["string"]
 }
-Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 4 a 6 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.`;
+Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 5 a 10 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.`;
 
 function extractJson(raw: string): string {
   let text = raw.trim();
