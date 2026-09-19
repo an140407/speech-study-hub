@@ -1,7 +1,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { applyHighlights, clearHighlightMarks, getSelectionOffsets } from "@/lib/highlight";
+import { applyHighlights, clearHighlightMarks, getSelectionOffsets, overlapsExisting } from "@/lib/highlight";
 
 type ContentType = "resumo" | "caso_clinico" | "revisao";
 
@@ -56,14 +57,18 @@ export function Highlightable({
 
   useEffect(() => {
     if (!ref.current) return;
-    if (!maskMode || !highlights.data?.length) {
-      clearHighlightMarks(ref.current);
-      return;
+    try {
+      if (!maskMode || !highlights.data?.length) {
+        clearHighlightMarks(ref.current);
+        return;
+      }
+      applyHighlights(
+        ref.current,
+        highlights.data.map((h) => ({ id: h.id, start: h.start_offset, end: h.end_offset })),
+      );
+    } catch (e) {
+      console.error("Erro ao aplicar grifos", e);
     }
-    applyHighlights(
-      ref.current,
-      highlights.data.map((h) => ({ id: h.id, start: h.start_offset, end: h.end_offset })),
-    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlights.data, maskMode]);
 
@@ -71,6 +76,12 @@ export function Highlightable({
     if (!ref.current) return;
     const offsets = getSelectionOffsets(ref.current);
     if (!offsets) return;
+    const existing = (highlights.data ?? []).map((h) => ({ start: h.start_offset, end: h.end_offset }));
+    if (overlapsExisting(offsets.start, offsets.end, existing)) {
+      toast.info("Esse trecho já tem um grifo.");
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
     addHighlight.mutate(offsets);
     window.getSelection()?.removeAllRanges();
   }
