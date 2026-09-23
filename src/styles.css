@@ -235,6 +235,19 @@ mark.fono-highlight {
 .hide-marks mark.fono-highlight {
   background-color: transparent;
 }
+
+/* Editor do Resumo: o padding/borda precisam ir no .ProseMirror de verdade
+   (é ele que é a área editável — o wrapper do EditorContent é só um <div> por fora). */
+.resumo-editor .ProseMirror {
+  outline: none;
+  min-height: 200px;
+}
+.resumo-editor.editing .ProseMirror {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--background);
+  padding: 1rem;
+}
 /* Esconde a barra de rolagem em telas de tablet/celular (rolagem continua funcionando) */
 @media (max-width: 1024px) {
   html {
