@@ -7,7 +7,8 @@ import { backfillSubtopics } from "@/lib/study-extra.functions";
 import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
-import { SimpleMarkdown } from "@/lib/markdown";
+import { markdownToHtml } from "@/lib/markdown-to-html";
+import { ResumoEditor } from "@/components/study/ResumoEditor";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
@@ -45,9 +46,11 @@ async function loadTopic(id: string) {
   ]);
   if (topic.error) throw topic.error;
   const byType = Object.fromEntries((materials.data ?? []).map((m) => [m.type, m.content])) as Record<string, unknown>;
+  const summaryContent = (byType["summary"] as { text?: string; html?: string } | undefined) ?? {};
   return {
     topic: topic.data,
-    summary: (byType["summary"] as { text?: string } | undefined)?.text ?? "",
+    summaryText: summaryContent.text ?? "",
+    summaryHtml: summaryContent.html ?? "",
     mindmap: (byType["mindmap"] as Mindmap | undefined) ?? null,
     cases: (cases.data ?? []) as unknown as ClinicalCaseRow[],
     review: (byType["review_questions"] as { items?: string[] } | undefined)?.items ?? [],
@@ -138,6 +141,22 @@ function TopicPage() {
   const queryClient = useQueryClient();
   const backfill = useServerFn(backfillSubtopics);
   const backfilled = useRef(false);
+  const summaryMigrated = useRef(false);
+
+  // Converte o resumo de markdown pra HTML uma única vez (pra ficar editável no TipTap).
+  useEffect(() => {
+    const d = q.data;
+    if (!d || summaryMigrated.current || d.summaryHtml) return;
+    if (!d.summaryText.trim()) return;
+    summaryMigrated.current = true;
+    const html = markdownToHtml(d.summaryText);
+    supabase
+      .from("materials")
+      .update({ content: { html, text: d.summaryText } })
+      .eq("topic_id", id)
+      .eq("type", "summary")
+      .then(() => queryClient.invalidateQueries({ queryKey: ["topic", id] }));
+  }, [q.data, id, queryClient]);
 
   async function deleteTopic() {
     setDeleting(true);
@@ -229,8 +248,12 @@ function TopicPage() {
           ))}
         </TabsList>
 
-        <TabsContent value="resumo" className="card-soft mt-4 animate-fade-up p-6 md:p-8">
-          <SimpleMarkdown text={d.summary} topicId={id} maskMode={maskMode} />
+        <TabsContent value="resumo" className="card-soft mt-4 animate-fade-up p-4 md:p-6">
+          {d.summaryHtml ? (
+            <ResumoEditor topicId={id} html={d.summaryHtml} maskMode={maskMode} />
+          ) : (
+            <p className="text-muted-foreground">Preparando o editor…</p>
+          )}
         </TabsContent>
         <TabsContent value="mapa" className="mt-4 animate-fade-up">
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
