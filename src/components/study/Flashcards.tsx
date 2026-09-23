@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Loader2, RotateCw, Sparkles, Layers, ChevronRight, Plus, Pencil } from "lucide-react";
+import { ArrowLeft, ArrowRight, Loader2, RotateCw, Sparkles, Layers, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -11,6 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMoreFlashcards } from "@/lib/study-extra.functions";
@@ -127,6 +131,34 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
                   </button>
                 }
               />
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive">
+                    <Trash2 className="size-3.5" /> Excluir
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Excluir este card?</AlertDialogTitle>
+                    <AlertDialogDescription>Não pode ser desfeito.</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={async () => {
+                        const { error } = await supabase.from("flashcards").delete().eq("id", card.id);
+                        if (error) { toast.error("Falha ao excluir o card."); return; }
+                        toast.success("Card excluído.");
+                        setI((v) => Math.max(0, v - 1));
+                        refresh();
+                      }}
+                    >
+                      Excluir
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             <div className="flip-scene h-72 cursor-pointer select-none" onClick={handleFlip}>
               <div className={cn("flip-inner relative h-full w-full", flipped && "flipped")}>

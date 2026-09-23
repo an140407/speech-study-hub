@@ -2,12 +2,16 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, FileText, Loader2, Paperclip, Sparkles, X } from "lucide-react";
+import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMaterial, generateMaterialFromPdf } from "@/lib/study.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
@@ -75,6 +79,21 @@ function Index() {
       return map;
     },
   });
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function confirmDeleteTopic() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from("topics").delete().eq("id", deleteTarget.id);
+    setDeleting(false);
+    if (error) { toast.error("Falha ao excluir o tópico."); return; }
+    toast.success("Tópico excluído.");
+    setDeleteTarget(null);
+    queryClient.invalidateQueries({ queryKey: ["topics"] });
+    queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
+  }
 
   const filtered = (topics.data ?? []).filter((t) =>
     t.title.toLowerCase().includes(search.trim().toLowerCase()),
@@ -235,10 +254,18 @@ function Index() {
                   key={t.id}
                   to="/topico/$id"
                   params={{ id: t.id }}
-                  className="card-soft group animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
+                  className="card-soft group relative animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
                   style={{ animationDelay: `${i * 40}ms` }}
                 >
-                  <h3 className="text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
+                  <button
+                    type="button"
+                    title="Excluir tópico"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget({ id: t.id, title: t.title }); }}
+                    className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                  <h3 className="pr-6 text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
                   <p className="mt-2 text-xs text-muted-foreground">
                     {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
@@ -255,6 +282,23 @@ function Index() {
           </div>
         )}
       </section>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir "{deleteTarget?.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso apaga o resumo, mapa mental, flashcards, questões e casos clínicos desse tópico. Não pode ser desfeito.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteTopic} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "Excluindo…" : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

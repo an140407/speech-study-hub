@@ -1,14 +1,21 @@
-import { useState } from "react";
-import { CheckCircle2, Loader2, Sparkles, XCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Loader2, Pencil, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { explainMcq, generateMoreMcq } from "@/lib/study-extra.functions";
 import type { McqRow } from "@/lib/study-types";
@@ -19,6 +26,12 @@ const MAX_MCQ = 50;
 export function McqPractice({ questions, topicId }: { questions: McqRow[]; topicId: string }) {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
+
+  const subtopics = useMemo(
+    () => [...new Set(questions.map((q) => q.subtopic).filter((s): s is string => !!s))].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [questions],
+  );
 
   async function answer(oi: number, q: McqRow) {
     setAnswers((a) => ({ ...a, [q.id]: oi }));
@@ -30,9 +43,17 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">{questions.length} de {MAX_MCQ} questões neste tópico</p>
-        <GenerateMcqDialog topicId={topicId} total={questions.length} />
+        <div className="flex gap-2">
+          <McqEditorDialog
+            topicId={topicId}
+            subtopics={subtopics}
+            onSaved={refresh}
+            trigger={<Button variant="outline" size="sm"><Plus className="size-4" /> Criar questão</Button>}
+          />
+          <GenerateMcqDialog topicId={topicId} total={questions.length} />
+        </div>
       </div>
 
       {questions.length === 0 && <p className="text-muted-foreground">Sem questões.</p>}
@@ -43,7 +64,49 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
         const correct = answered && chosen === q.correct_index;
         return (
           <div key={q.id} className="card-soft p-5">
-            <p className="font-medium leading-relaxed"><span className="mr-2 text-primary">{qi + 1}.</span>{q.question}</p>
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-medium leading-relaxed"><span className="mr-2 text-primary">{qi + 1}.</span>{q.question}</p>
+              <div className="flex shrink-0 gap-1">
+                <McqEditorDialog
+                  topicId={topicId}
+                  question={q}
+                  subtopics={subtopics}
+                  onSaved={refresh}
+                  trigger={
+                    <button type="button" title="Editar questão" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary">
+                      <Pencil className="size-3.5" />
+                    </button>
+                  }
+                />
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <button type="button" title="Excluir questão" className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Excluir esta questão?</AlertDialogTitle>
+                      <AlertDialogDescription>Não pode ser desfeito.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async () => {
+                          const { error } = await supabase.from("mcq_questions").delete().eq("id", q.id);
+                          if (error) { toast.error("Falha ao excluir a questão."); return; }
+                          toast.success("Questão excluída.");
+                          refresh();
+                        }}
+                      >
+                        Excluir
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
             {q.subtopic && <p className="mt-1 text-xs text-muted-foreground">{q.subtopic}</p>}
             <div className="mt-3 grid gap-2">
               {q.options.map((opt, oi) => {
@@ -88,6 +151,126 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
         );
       })}
     </div>
+  );
+}
+
+/** Cria uma questão nova (sem `question`) ou edita uma existente (com `question`). */
+function McqEditorDialog({
+  topicId,
+  question,
+  subtopics,
+  trigger,
+  onSaved,
+}: {
+  topicId: string;
+  question?: McqRow;
+  subtopics: string[];
+  trigger: React.ReactNode;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [options, setOptions] = useState(["", "", "", ""]);
+  const [correct, setCorrect] = useState("0");
+  const [explanation, setExplanation] = useState("");
+  const [subtopic, setSubtopic] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setText(question?.question ?? "");
+      setOptions(question?.options ? [...question.options] : ["", "", "", ""]);
+      setCorrect(String(question?.correct_index ?? 0));
+      setExplanation(question?.explanation ?? "");
+      setSubtopic(question?.subtopic ?? "");
+    }
+  }, [open, question]);
+
+  async function save() {
+    const q = text.trim();
+    const opts = options.map((o) => o.trim());
+    if (!q || opts.some((o) => !o)) { toast.error("Preencha a pergunta e as 4 alternativas."); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        question: q,
+        options: opts,
+        correct_index: Number(correct),
+        explanation: explanation.trim(),
+        subtopic: subtopic || null,
+      };
+      if (question) {
+        const { error } = await supabase.from("mcq_questions").update(payload).eq("id", question.id);
+        if (error) throw error;
+        toast.success("Questão atualizada.");
+      } else {
+        const { error } = await supabase.from("mcq_questions").insert({ topic_id: topicId, ...payload });
+        if (error) throw error;
+        toast.success("Questão criada.");
+      }
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao salvar a questão.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{question ? "Editar questão" : "Criar questão"}</DialogTitle>
+          <DialogDescription>
+            {question ? "Ajuste a pergunta, as alternativas ou a explicação." : "Escreva sua própria questão de múltipla escolha."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium" htmlFor="mcq-q">Pergunta</label>
+            <Textarea id="mcq-q" rows={2} value={text} onChange={(e) => setText(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <p className="text-sm font-medium">Alternativas (marque a correta)</p>
+            <RadioGroup value={correct} onValueChange={setCorrect} className="mt-2 space-y-2">
+              {options.map((opt, oi) => (
+                <div key={oi} className="flex items-center gap-2">
+                  <RadioGroupItem value={String(oi)} id={`mcq-opt-${oi}`} />
+                  <Input
+                    value={opt}
+                    onChange={(e) => setOptions((os) => os.map((o, i) => (i === oi ? e.target.value : o)))}
+                    placeholder={`Alternativa ${LETTERS[oi]}`}
+                    className="flex-1"
+                  />
+                </div>
+              ))}
+            </RadioGroup>
+          </div>
+          <div>
+            <label className="text-sm font-medium" htmlFor="mcq-exp">Explicação</label>
+            <Textarea id="mcq-exp" rows={2} value={explanation} onChange={(e) => setExplanation(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-sm font-medium" htmlFor="mcq-sub">Sub-tópico</label>
+            <Select value={subtopic || "__none"} onValueChange={(v) => setSubtopic(v === "__none" ? "" : v)}>
+              <SelectTrigger id="mcq-sub" className="mt-1"><SelectValue placeholder="Sem sub-tópico" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Sem sub-tópico</SelectItem>
+                {subtopics.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+            {saving ? "Salvando…" : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

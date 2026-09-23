@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { backfillSubtopics } from "@/lib/study-extra.functions";
-import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff } from "lucide-react";
+import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { SimpleMarkdown } from "@/lib/markdown";
@@ -14,6 +15,11 @@ import { McqPractice } from "@/components/study/McqPractice";
 import { MindMap } from "@/components/study/MindMap";
 import { ClinicalCase } from "@/components/study/ClinicalCase";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/topico/$id")({
   head: () => ({
@@ -73,13 +79,74 @@ function RevisaoTab({ topicId, review, maskMode }: { topicId: string; review: st
   );
 }
 
+function EditableTitle({ id, title }: { id: string; title: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title);
+  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+
+  async function save() {
+    const v = value.trim();
+    if (!v) { toast.error("O título não pode ficar vazio."); return; }
+    if (v === title) { setEditing(false); return; }
+    setSaving(true);
+    const { error } = await supabase.from("topics").update({ title: v }).eq("id", id);
+    setSaving(false);
+    if (error) { toast.error("Falha ao renomear o tópico."); return; }
+    toast.success("Tópico renomeado.");
+    setEditing(false);
+    queryClient.invalidateQueries({ queryKey: ["topic", id] });
+    queryClient.invalidateQueries({ queryKey: ["topics"] });
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-1 flex-wrap items-center gap-2">
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="h-11 flex-1 text-lg font-semibold md:text-xl"
+          maxLength={120}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") { setValue(title); setEditing(false); }
+          }}
+        />
+        <Button size="sm" onClick={save} disabled={saving}>{saving ? "Salvando…" : "Salvar"}</Button>
+        <Button size="sm" variant="outline" onClick={() => { setValue(title); setEditing(false); }} disabled={saving}>
+          Cancelar
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={() => setEditing(true)} className="group flex min-w-0 items-center gap-2 text-left">
+      <h1 className="truncate text-3xl font-semibold leading-tight md:text-4xl">{title}</h1>
+      <Pencil className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+    </button>
+  );
+}
+
 function TopicPage() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
   const [maskMode, setMaskMode] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const queryClient = useQueryClient();
   const backfill = useServerFn(backfillSubtopics);
   const backfilled = useRef(false);
+
+  async function deleteTopic() {
+    setDeleting(true);
+    const { error } = await supabase.from("topics").delete().eq("id", id);
+    setDeleting(false);
+    if (error) { toast.error("Falha ao excluir o tópico."); return; }
+    queryClient.invalidateQueries({ queryKey: ["topics"] });
+    navigate({ to: "/" });
+  }
 
   // Classifica em segundo plano flashcards/questões antigos sem sub-tópico.
   useEffect(() => {
@@ -118,18 +185,40 @@ function TopicPage() {
         <ArrowLeft className="size-4" /> Tópicos
       </Link>
       <div className="mt-2 flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-semibold leading-tight md:text-4xl">{d.topic.title}</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 gap-1.5"
-          onClick={() => setMaskMode((v) => !v)}
-          title={maskMode ? "Esconder grifos (modo máscara)" : "Mostrar grifos"}
-        >
-          {maskMode ? <Highlighter className="size-4" /> : <EyeOff className="size-4" />}
-          {maskMode ? "Grifos visíveis" : "Grifos escondidos"}
-        </Button>
+        <EditableTitle id={id} title={d.topic.title} />
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setMaskMode((v) => !v)}
+            title={maskMode ? "Esconder grifos (modo máscara)" : "Mostrar grifos"}
+          >
+            {maskMode ? <Highlighter className="size-4" /> : <EyeOff className="size-4" />}
+            <span className="hidden sm:inline">{maskMode ? "Grifos visíveis" : "Grifos escondidos"}</span>
+          </Button>
+          <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)} title="Excluir tópico">
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
       </div>
+
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir "{d.topic.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso apaga o resumo, mapa mental, flashcards, questões e casos clínicos desse tópico. Não pode ser desfeito.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteTopic} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "Excluindo…" : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Tabs defaultValue="resumo" className="mt-6">
         <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-card p-1 shadow-soft">
