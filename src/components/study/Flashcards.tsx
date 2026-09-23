@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Loader2, RotateCw, Sparkles, Layers, ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, ArrowRight, Loader2, RotateCw, Sparkles, Layers, ChevronRight, Plus, Pencil } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -24,11 +26,14 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
   const [seen, setSeen] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
 
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
+
   const groups = useMemo(() => {
     const m = new Map<string, number>();
     for (const c of cards) m.set(c.subtopic ?? SEM_SUB, (m.get(c.subtopic ?? SEM_SUB) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "pt-BR"));
   }, [cards]);
+  const subtopicNames = groups.map(([n]) => n).filter((n) => n !== SEM_SUB);
 
   const filtered = useMemo(
     () => (subtopic === null ? cards : cards.filter((c) => (c.subtopic ?? SEM_SUB) === subtopic)),
@@ -89,10 +94,16 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
             </li>
           ))}
         </ul>
-        <GenerateFlashcardsDialog
+        <GenerateFlashcardsDialog topicId={topicId} total={cards.length} subtopics={subtopicNames} />
+        <CardEditorDialog
           topicId={topicId}
-          total={cards.length}
-          subtopics={groups.map(([n]) => n).filter((n) => n !== SEM_SUB)}
+          subtopics={subtopicNames}
+          onSaved={refresh}
+          trigger={
+            <Button variant="outline" className="w-full">
+              <Plus className="size-4" /> Criar card
+            </Button>
+          }
         />
       </aside>
 
@@ -101,9 +112,22 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
           <p className="text-muted-foreground">Sem flashcards neste sub-tópico.</p>
         ) : (
           <>
-            <p className="mb-3 text-center text-xs text-muted-foreground">
-              Cartão {Math.min(i, filtered.length - 1) + 1} de {filtered.length} · clique para virar
-            </p>
+            <div className="mb-3 flex items-center justify-center gap-3">
+              <p className="text-center text-xs text-muted-foreground">
+                Cartão {Math.min(i, filtered.length - 1) + 1} de {filtered.length} · clique para virar
+              </p>
+              <CardEditorDialog
+                topicId={topicId}
+                card={card}
+                subtopics={subtopicNames}
+                onSaved={refresh}
+                trigger={
+                  <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">
+                    <Pencil className="size-3.5" /> Editar
+                  </button>
+                }
+              />
+            </div>
             <div className="flip-scene h-72 cursor-pointer select-none" onClick={handleFlip}>
               <div className={cn("flip-inner relative h-full w-full", flipped && "flipped")}>
                 <div className="flip-face card-soft absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
@@ -136,6 +160,108 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
         )}
       </div>
     </div>
+  );
+}
+
+/** Cria um flashcard novo (sem card) ou edita um existente (com card) — mesmo diálogo pros dois casos. */
+function CardEditorDialog({
+  topicId,
+  card,
+  subtopics,
+  trigger,
+  onSaved,
+}: {
+  topicId: string;
+  card?: FlashcardRow;
+  subtopics: string[];
+  trigger: React.ReactNode;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [front, setFront] = useState("");
+  const [back, setBack] = useState("");
+  const [subtopic, setSubtopic] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setFront(card?.front ?? "");
+      setBack(card?.back ?? "");
+      setSubtopic(card?.subtopic ?? "");
+    }
+  }, [open, card]);
+
+  async function save() {
+    const f = front.trim();
+    const b = back.trim();
+    if (!f || !b) { toast.error("Preencha a frente e o verso do card."); return; }
+    setSaving(true);
+    try {
+      if (card) {
+        const { error } = await supabase
+          .from("flashcards")
+          .update({ front: f, back: b, subtopic: subtopic || null })
+          .eq("id", card.id);
+        if (error) throw error;
+        toast.success("Card atualizado.");
+      } else {
+        const { error } = await supabase
+          .from("flashcards")
+          .insert({ topic_id: topicId, front: f, back: b, subtopic: subtopic || null });
+        if (error) throw error;
+        toast.success("Card criado.");
+      }
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Falha ao salvar o card.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{card ? "Editar card" : "Criar card"}</DialogTitle>
+          <DialogDescription>
+            {card ? "Ajuste a frente, o verso ou o sub-tópico deste card." : "Escreva seu próprio flashcard pra esse tópico."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium" htmlFor="card-front">Frente</label>
+            <Textarea id="card-front" rows={2} value={front} onChange={(e) => setFront(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-sm font-medium" htmlFor="card-back">Verso</label>
+            <Textarea id="card-back" rows={3} value={back} onChange={(e) => setBack(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <label className="text-sm font-medium" htmlFor="card-subtopic">Sub-tópico</label>
+            <Select value={subtopic || "__none"} onValueChange={(v) => setSubtopic(v === "__none" ? "" : v)}>
+              <SelectTrigger id="card-subtopic" className="mt-1">
+                <SelectValue placeholder="Sem sub-tópico" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Sem sub-tópico</SelectItem>
+                {subtopics.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={save} disabled={saving}>
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <Pencil className="size-4" />}
+            {saving ? "Salvando…" : "Salvar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

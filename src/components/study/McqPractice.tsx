@@ -17,11 +17,11 @@ const LETTERS = ["A", "B", "C", "D"];
 const MAX_MCQ = 50;
 
 export function McqPractice({ questions, topicId }: { questions: McqRow[]; topicId: string }) {
-  const [answers, setAnswers] = useState<Record<number, number>>({});
+  const [answers, setAnswers] = useState<Record<string, number>>({});
   const queryClient = useQueryClient();
 
-  async function answer(qi: number, oi: number, q: McqRow) {
-    setAnswers((a) => ({ ...a, [qi]: oi }));
+  async function answer(oi: number, q: McqRow) {
+    setAnswers((a) => ({ ...a, [q.id]: oi }));
     if (!q.seen_at) {
       await supabase.rpc("mark_mcq_seen", { p_mcq_id: q.id });
       queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
@@ -38,7 +38,7 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
       {questions.length === 0 && <p className="text-muted-foreground">Sem questões.</p>}
 
       {questions.map((q, qi) => {
-        const chosen = answers[qi];
+        const chosen = answers[q.id];
         const answered = chosen !== undefined;
         const correct = answered && chosen === q.correct_index;
         return (
@@ -54,7 +54,7 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
                     key={oi}
                     type="button"
                     disabled={answered}
-                    onClick={() => answer(qi, oi, q)}
+                    onClick={() => answer(oi, q)}
                     className={cn(
                       "flex items-start gap-3 rounded-xl border p-3 text-left text-sm transition-colors disabled:cursor-default",
                       !answered && "hover:bg-muted",
