@@ -24,7 +24,7 @@ async function callModel(system: string, user: string): Promise<string> {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: "user", parts: [{ text: user }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.8 },
+          generationConfig: { responseMimeType: "application/json", temperature: 0.8, maxOutputTokens: 50000 },
         }),
       },
     );
@@ -32,7 +32,10 @@ async function callModel(system: string, user: string): Promise<string> {
       console.error("Gemini error", res.status, await res.text());
       throw new Error(`Erro na API do Gemini (${res.status}).`);
     }
-    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
+    if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+      throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.");
+    }
     return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   }
 
@@ -52,6 +55,7 @@ async function callModel(system: string, user: string): Promise<string> {
         { role: "user", content: `${user}\n\nResponda SOMENTE com JSON válido.` },
       ],
       response_format: { type: "json_object" },
+      max_tokens: 50000,
     }),
   });
   if (!res.ok) {
@@ -60,7 +64,10 @@ async function callModel(system: string, user: string): Promise<string> {
     if (res.status === 402) throw new Error("Créditos de IA esgotados. Adicione créditos no workspace.");
     throw new Error(`Erro na IA (${res.status}).`);
   }
-  const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  const json = (await res.json()) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+  if (json.choices?.[0]?.finish_reason === "length") {
+    throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.");
+  }
   return json.choices?.[0]?.message?.content ?? "";
 }
 

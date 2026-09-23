@@ -115,7 +115,9 @@ async function callModel(topic: string): Promise<string> {
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.7 },
+          // 32000 é o mesmo valor que o MedReview usa — o padrão da API (sem isso)
+          // já cortou material grande no passado (ver histórico do MedReview).
+          generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 32000 },
         }),
       },
     );
@@ -125,8 +127,11 @@ async function callModel(topic: string): Promise<string> {
       throw new Error(`Erro na API do Gemini (${res.status}).`);
     }
     const json = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
     };
+    if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+      throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente de novo.");
+    }
     return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
   }
 
@@ -267,7 +272,7 @@ export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<G
             ],
           },
         ],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.6 },
+        generationConfig: { responseMimeType: "application/json", temperature: 0.6, maxOutputTokens: 32000 },
       }),
     });
     if (!res.ok) {
@@ -276,7 +281,11 @@ export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<G
       lastError = new Error(`Erro na API do Gemini (${res.status}).`);
       continue;
     }
-    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
+    if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+      lastError = new Error("A resposta da IA foi cortada por ficar grande demais.");
+      continue;
+    }
     const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
     try {
       const parsed = JSON.parse(extractJson(raw)) as Record<string, unknown>;
