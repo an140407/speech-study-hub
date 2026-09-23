@@ -2,10 +2,10 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { BookOpen, Loader2, Sparkles } from "lucide-react";
+import { BookOpen, FileText, Loader2, Paperclip, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { generateMaterial } from "@/lib/study.functions";
+import { generateMaterial, generateMaterialFromPdf } from "@/lib/study.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -27,10 +27,12 @@ const EXAMPLES = ["Paralisia facial periférica", "Disfagia orofaríngea", "Gagu
 
 function Index() {
   const [topic, setTopic] = useState("");
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
+  const generateFromPdf = useServerFn(generateMaterialFromPdf);
 
   const [search, setSearch] = useState("");
 
@@ -79,13 +81,37 @@ function Index() {
   );
 
 
+  function handlePickPdf(file: File | null) {
+    if (!file) return;
+    if (file.type !== "application/pdf") { toast.error("Envie um arquivo PDF."); return; }
+    if (file.size > 15 * 1024 * 1024) { toast.error("PDF muito grande — o limite é 15MB."); return; }
+    setTopic("");
+    setPdfFile(file);
+  }
+
+  function readAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.slice(result.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function handleGenerate(e?: React.FormEvent) {
     e?.preventDefault();
-    const t = topic.trim();
-    if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras."); return; }
+    if (!pdfFile) {
+      const t = topic.trim();
+      if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras, ou anexe um PDF."); return; }
+    }
     setLoading(true);
     try {
-      const res = await generate({ data: { topic: t } });
+      const res = pdfFile
+        ? await generateFromPdf({ data: { pdf_base64: await readAsBase64(pdfFile) } })
+        : await generate({ data: { topic: topic.trim() } });
       await queryClient.invalidateQueries({ queryKey: ["topics"] });
       toast.success("Material gerado!");
       navigate({ to: "/topico/$id", params: { id: res.topic_id } });
@@ -110,23 +136,56 @@ function Index() {
         </p>
 
         <form onSubmit={handleGenerate} className="mx-auto mt-8 flex max-w-xl flex-col gap-2 sm:flex-row">
-          <Input
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="Digite um tema de Fonoaudiologia"
-            className="h-12 rounded-xl bg-card text-base shadow-soft"
-            disabled={loading}
-            maxLength={120}
-          />
+          {pdfFile ? (
+            <div className="flex h-12 flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 shadow-soft">
+              <FileText className="size-4 shrink-0 text-primary" />
+              <span className="truncate text-sm">{pdfFile.name}</span>
+              <button
+                type="button"
+                onClick={() => setPdfFile(null)}
+                className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Remover PDF"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="relative flex-1">
+              <Input
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="Digite um tema de Fonoaudiologia"
+                className="h-12 rounded-xl bg-card pr-10 text-base shadow-soft"
+                disabled={loading}
+                maxLength={120}
+              />
+              <label
+                title="Ou envie um PDF de aula"
+                className="absolute right-1 top-1 flex size-10 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Paperclip className="size-4" />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  disabled={loading}
+                  onChange={(e) => handlePickPdf(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            </div>
+          )}
           <Button type="submit" size="lg" className="h-12 rounded-xl px-6 shadow-soft" disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {loading ? "Gerando…" : "Gerar material de estudo"}
+            {loading ? "Gerando…" : pdfFile ? "Gerar a partir do PDF" : "Gerar material de estudo"}
           </Button>
         </form>
+        <p className="mt-2 text-xs text-muted-foreground">
+          {pdfFile ? "A IA identifica o tema sozinha ao ler o PDF." : "Ou anexe um PDF de aula pelo clipe — a IA descobre o tema sozinha."}
+        </p>
         {loading && (
           <p className="mt-3 text-sm text-muted-foreground">Isso costuma levar de 20 a 60 segundos.</p>
         )}
-        {!loading && (
+        {!loading && !pdfFile && (
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {EXAMPLES.map((ex) => (
               <button

@@ -16,6 +16,23 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
 }
 Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 5 a 10 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.`;
 
+const SYSTEM_PROMPT_PDF = `Você é um professor universitário de Fonoaudiologia no Brasil. Vai receber um PDF de aula, slide ou material de estudo. Primeiro identifique o tema central e específico coberto no PDF (um título curto, no mesmo estilo de "Disfagia orofaríngea" ou "Paralisia facial periférica" — nunca genérico como "Fonoaudiologia" ou "Aula 3"). Depois gere material de estudo em português do Brasil, com rigor acadêmico, baseado no CONTEÚDO REAL do PDF (não invente fatos que não estejam nele ou que não sejam de conhecimento consolidado da área).
+Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
+{
+  "topic_title": "string (o título curto e específico que você identificou)",
+  "summary": "string em markdown simples (use ## para seções, listas com -, **negrito**); 400 a 700 palavras",
+  "mindmap": { "topic": "string", "branches": [{ "title": "string", "children": ["string"] }] },
+  "flashcards": [{ "front": "string", "back": "string", "subtopic": "string (deve ser igual ao title de um dos branches do mindmap)" }],
+  "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string", "subtopic": "string (igual ao title de um dos branches do mindmap)" }],
+  "clinical_case": {
+    "scenario": "string",
+    "guiding_questions": [{ "question": "string", "answer": "string (resposta completa e correta da pergunta guiada)" }],
+    "case_explanation": "string (explicação geral de todo o caso; 100 a 200 palavras)"
+  },
+  "review_questions": ["string"]
+}
+Regras: mesmas do material padrão — mindmap com 4 a 6 ramos e 3 a 5 filhos; flashcards e mcq sempre com "subtopic" igual a um branch existente; flashcards de 8 a 12; mcq com EXATAMENTE 10 questões (4 alternativas cada); clinical_case com 5 a 10 guiding_questions já respondidas; review_questions de 5 a 8. Se o PDF cobrir mais de um tema, escolha o principal/mais extenso e gere material só sobre ele.`;
+
 function extractJson(raw: string): string {
   let text = raw.trim();
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -224,4 +241,53 @@ export async function generateStudyMaterial(topic: string): Promise<GeneratedMat
   }
   console.error(lastError);
   throw new Error("A IA devolveu um formato inesperado. Tente novamente.");
+}
+
+/** Gera material a partir de um PDF (aula/slide). Só funciona com GEMINI_API_KEY própria —
+ *  o gateway do Lovable (chat/completions) não tem um formato confirmado pra anexar documentos. */
+export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<GeneratedMaterial & { topic_title: string }> {
+  const geminiKey = process.env["GEMINI_API_KEY"];
+  if (!geminiKey) {
+    throw new Error("Gerar a partir de PDF exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.");
+  }
+  const model = "gemini-3.1-flash-lite";
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT_PDF }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },
+              { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
+            ],
+          },
+        ],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.6 },
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.error("Gemini PDF error", res.status, body);
+      lastError = new Error(`Erro na API do Gemini (${res.status}).`);
+      continue;
+    }
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    try {
+      const parsed = JSON.parse(extractJson(raw)) as Record<string, unknown>;
+      const topic_title = String(parsed["topic_title"] ?? "").trim() || "Tema do PDF";
+      const material = validate(parsed);
+      return { ...material, topic_title };
+    } catch (e) {
+      lastError = e;
+      console.error(`PDF parse/validate failed (attempt ${attempt + 1})`, e, raw.slice(0, 300));
+    }
+  }
+  console.error(lastError);
+  throw new Error("A IA não conseguiu processar esse PDF. Tente outro arquivo ou um tema digitado.");
 }
