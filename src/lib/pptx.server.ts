@@ -39,5 +39,24 @@ export async function extractPptxText(base64: string): Promise<string> {
     throw new Error("Não encontrei texto nos slides — esse PPTX pode ser só imagens/diagramas.");
   }
 
-  return slides.map((s, i) => `Slide ${i + 1}: ${s}`).join("\n\n");
+  // Teto de segurança: decks muito grandes (ex.: cronograma de um semestre inteiro)
+  // confundem a IA tentando gerar material sobre tudo de uma vez. Corta no limite
+  // de um slide (nunca no meio de um), mantendo o começo do arquivo.
+  const MAX_CHARS = 20000;
+  const kept: string[] = [];
+  let total = 0;
+  let truncated = false;
+  for (const s of slides) {
+    if (total + s.length > MAX_CHARS && kept.length > 0) {
+      truncated = true;
+      break;
+    }
+    kept.push(s);
+    total += s.length;
+  }
+
+  const body = kept.map((s, i) => `Slide ${i + 1}: ${s}`).join("\n\n");
+  return truncated
+    ? `${body}\n\n[Restante do arquivo omitido — cobria outras aulas/semanas. Gere material só sobre o assunto técnico já apresentado até aqui.]`
+    : body;
 }

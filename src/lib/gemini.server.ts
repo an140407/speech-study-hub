@@ -32,7 +32,7 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
   },
   "review_questions": ["string"]
 }
-Regras: mesmas do material padrão — mindmap com 4 a 6 ramos e 3 a 5 filhos; flashcards e mcq sempre com "subtopic" igual a um branch existente; flashcards de 8 a 12; mcq com EXATAMENTE 10 questões (4 alternativas cada); clinical_case com 5 a 10 guiding_questions já respondidas; review_questions de 5 a 8. Se o PDF cobrir mais de um tema, escolha o principal/mais extenso e gere material só sobre ele.`;
+Regras: mesmas do material padrão — mindmap com 4 a 6 ramos e 3 a 5 filhos; flashcards e mcq sempre com "subtopic" igual a um branch existente; flashcards de 8 a 12; mcq com EXATAMENTE 10 questões (4 alternativas cada); clinical_case com 5 a 10 guiding_questions já respondidas; review_questions de 5 a 8. Se o arquivo cobrir mais de um tema (ex.: um cronograma de semestre com várias aulas), IGNORE conteúdo administrativo (ementa, critérios de avaliação, cronograma, capa) e escolha só o primeiro assunto técnico/clínico substancial — gere material completo só sobre ele, não sobre o curso inteiro.`;
 
 function extractJson(raw: string): string {
   let text = raw.trim();
