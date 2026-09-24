@@ -1,13 +1,5 @@
 import JSZip from "jszip";
-
-function base64ToUint8Array(base64: string): Uint8Array {
-  // Buffer existe no Node; no runtime do Cloudflare Workers cai no atob.
-  if (typeof Buffer !== "undefined") return new Uint8Array(Buffer.from(base64, "base64"));
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
+import { base64ToUint8Array } from "./base64.server";
 
 function unescapeXml(s: string): string {
   return s

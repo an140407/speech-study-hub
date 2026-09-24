@@ -109,9 +109,9 @@ function Index() {
       file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
       name.endsWith(".pptx");
     if (!isPdf && !isPptx) { toast.error("Envie um arquivo PDF ou PPTX."); return; }
-    const maxBytes = (isPdf ? 15 : 50) * 1024 * 1024;
+    const maxBytes = 50 * 1024 * 1024;
     if (file.size > maxBytes) {
-      toast.error(`Arquivo muito grande — o limite é ${isPdf ? "15MB pra PDF" : "50MB pra PPTX"}.`);
+      toast.error("Arquivo muito grande — o limite é 50MB.");
       return;
     }
     setTopic("");

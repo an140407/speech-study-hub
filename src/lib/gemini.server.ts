@@ -1,4 +1,5 @@
 import type { GeneratedMaterial } from "./study-types";
+import { base64ToUint8Array } from "./base64.server";
 
 const SYSTEM_PROMPT = `Você é um professor universitário de Fonoaudiologia no Brasil. Gere material de estudo em português do Brasil, com rigor acadêmico e linguagem clara para estudantes de graduação.
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
@@ -248,10 +249,54 @@ export async function generateStudyMaterial(topic: string): Promise<GeneratedMat
   throw new Error("A IA devolveu um formato inesperado. Tente novamente.");
 }
 
-type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+type GeminiPart =
+  | { text: string }
+  | { inlineData: { mimeType: string; data: string } }
+  | { file_data: { mime_type: string; file_uri: string } };
+
+/** Envia um PDF pra File API do Gemini (upload resumível em duas etapas) e devolve o
+ *  file_uri pra referenciar na geração. Suporta até 50MB — bem mais que o limite de
+ *  ~20MB de mandar o arquivo embutido direto na chamada (inlineData). */
+async function uploadPdfToGeminiFiles(pdfBase64: string, apiKey: string): Promise<string> {
+  const bytes = base64ToUint8Array(pdfBase64);
+  const startRes = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
+    method: "POST",
+    headers: {
+      "X-Goog-Upload-Protocol": "resumable",
+      "X-Goog-Upload-Command": "start",
+      "X-Goog-Upload-Header-Content-Length": String(bytes.length),
+      "X-Goog-Upload-Header-Content-Type": "application/pdf",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ file: { display_name: "resumo.pdf" } }),
+  });
+  if (!startRes.ok) {
+    console.error("Gemini upload start error", startRes.status, await startRes.text());
+    throw new Error(`Falha ao iniciar o envio do PDF pro Gemini (${startRes.status}).`);
+  }
+  const uploadUrl = startRes.headers.get("x-goog-upload-url");
+  if (!uploadUrl) throw new Error("O Gemini não devolveu a URL de upload.");
+
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(bytes.length),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: bytes as BodyInit,
+  });
+  if (!uploadRes.ok) {
+    console.error("Gemini upload finalize error", uploadRes.status, await uploadRes.text());
+    throw new Error(`Falha ao enviar o PDF pro Gemini (${uploadRes.status}).`);
+  }
+  const info = (await uploadRes.json()) as { file?: { uri?: string } };
+  if (!info.file?.uri) throw new Error("O Gemini não devolveu o arquivo enviado.");
+  return info.file.uri;
+}
 
 /** Núcleo compartilhado: manda as partes (texto e/ou documento) pro Gemini, valida e devolve
- *  o material + o título identificado. Usado tanto pra PDF (inlineData) quanto pra texto puro
+ *  o material + o título identificado. Usado tanto pra PDF (file_data) quanto pra texto puro
  *  (PPTX já extraído, ou qualquer fonte futura). */
 async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): Promise<GeneratedMaterial & { topic_title: string }> {
   const geminiKey = process.env["GEMINI_API_KEY"];
@@ -297,13 +342,19 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
 }
 
 /** Gera material a partir de um PDF (aula/slide) — o Gemini lê o documento visualmente.
- *  Só funciona com GEMINI_API_KEY própria — o gateway do Lovable não tem formato
- *  confirmado pra anexar documentos. */
+ *  O PDF é enviado primeiro pela File API (suporta até 50MB) e só a referência é usada
+ *  na geração. Só funciona com GEMINI_API_KEY própria — o gateway do Lovable não tem
+ *  formato confirmado pra anexar documentos. */
 export async function generateStudyMaterialFromPdf(pdfBase64: string) {
+  const geminiKey = process.env["GEMINI_API_KEY"];
+  if (!geminiKey) {
+    throw new Error("Gerar a partir de PDF exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.");
+  }
+  const fileUri = await uploadPdfToGeminiFiles(pdfBase64, geminiKey);
   return generateFromParts(
     [
       { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },
-      { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
+      { file_data: { mime_type: "application/pdf", file_uri: fileUri } },
     ],
     "PDF",
   );
