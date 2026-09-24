@@ -5,7 +5,7 @@ import { useState } from "react";
 import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { generateMaterial, generateMaterialFromPdf } from "@/lib/study.functions";
+import { generateMaterial, generateMaterialFromPdf, generateMaterialFromPptx } from "@/lib/study.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,12 +31,13 @@ const EXAMPLES = ["Paralisia facial periférica", "Disfagia orofaríngea", "Gagu
 
 function Index() {
   const [topic, setTopic] = useState("");
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{ file: File; kind: "pdf" | "pptx" } | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
   const generateFromPdf = useServerFn(generateMaterialFromPdf);
+  const generateFromPptx = useServerFn(generateMaterialFromPptx);
 
   const [search, setSearch] = useState("");
 
@@ -100,12 +101,17 @@ function Index() {
   );
 
 
-  function handlePickPdf(file: File | null) {
+  function handlePickFile(file: File | null) {
     if (!file) return;
-    if (file.type !== "application/pdf") { toast.error("Envie um arquivo PDF."); return; }
-    if (file.size > 15 * 1024 * 1024) { toast.error("PDF muito grande — o limite é 15MB."); return; }
+    const name = file.name.toLowerCase();
+    const isPdf = file.type === "application/pdf" || name.endsWith(".pdf");
+    const isPptx =
+      file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+      name.endsWith(".pptx");
+    if (!isPdf && !isPptx) { toast.error("Envie um arquivo PDF ou PPTX."); return; }
+    if (file.size > 15 * 1024 * 1024) { toast.error("Arquivo muito grande — o limite é 15MB."); return; }
     setTopic("");
-    setPdfFile(file);
+    setAttachedFile({ file, kind: isPdf ? "pdf" : "pptx" });
   }
 
   function readAsBase64(file: File): Promise<string> {
@@ -122,15 +128,20 @@ function Index() {
 
   async function handleGenerate(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!pdfFile) {
+    if (!attachedFile) {
       const t = topic.trim();
-      if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras, ou anexe um PDF."); return; }
+      if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras, ou anexe um PDF/PPTX."); return; }
     }
     setLoading(true);
     try {
-      const res = pdfFile
-        ? await generateFromPdf({ data: { pdf_base64: await readAsBase64(pdfFile) } })
-        : await generate({ data: { topic: topic.trim() } });
+      let res: { topic_id: string };
+      if (attachedFile?.kind === "pdf") {
+        res = await generateFromPdf({ data: { pdf_base64: await readAsBase64(attachedFile.file) } });
+      } else if (attachedFile?.kind === "pptx") {
+        res = await generateFromPptx({ data: { pptx_base64: await readAsBase64(attachedFile.file) } });
+      } else {
+        res = await generate({ data: { topic: topic.trim() } });
+      }
       await queryClient.invalidateQueries({ queryKey: ["topics"] });
       toast.success("Material gerado!");
       navigate({ to: "/topico/$id", params: { id: res.topic_id } });
@@ -155,15 +166,15 @@ function Index() {
         </p>
 
         <form onSubmit={handleGenerate} className="mx-auto mt-8 flex max-w-xl flex-col gap-2 sm:flex-row">
-          {pdfFile ? (
+          {attachedFile ? (
             <div className="flex h-12 flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 shadow-soft">
               <FileText className="size-4 shrink-0 text-primary" />
-              <span className="truncate text-sm">{pdfFile.name}</span>
+              <span className="truncate text-sm">{attachedFile.file.name}</span>
               <button
                 type="button"
-                onClick={() => setPdfFile(null)}
+                onClick={() => setAttachedFile(null)}
                 className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Remover PDF"
+                title="Remover arquivo"
               >
                 <X className="size-4" />
               </button>
@@ -179,32 +190,32 @@ function Index() {
                 maxLength={120}
               />
               <label
-                title="Ou envie um PDF de aula"
+                title="Ou envie um PDF/PPTX de aula"
                 className="absolute right-1 top-1 flex size-10 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <Paperclip className="size-4" />
                 <input
                   type="file"
-                  accept="application/pdf"
+                  accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                   className="hidden"
                   disabled={loading}
-                  onChange={(e) => handlePickPdf(e.target.files?.[0] ?? null)}
+                  onChange={(e) => handlePickFile(e.target.files?.[0] ?? null)}
                 />
               </label>
             </div>
           )}
           <Button type="submit" size="lg" className="h-12 rounded-xl px-6 shadow-soft" disabled={loading}>
             {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {loading ? "Gerando…" : pdfFile ? "Gerar a partir do PDF" : "Gerar material de estudo"}
+            {loading ? "Gerando…" : attachedFile ? `Gerar a partir do ${attachedFile.kind.toUpperCase()}` : "Gerar material de estudo"}
           </Button>
         </form>
         <p className="mt-2 text-xs text-muted-foreground">
-          {pdfFile ? "A IA identifica o tema sozinha ao ler o PDF." : "Ou anexe um PDF de aula pelo clipe — a IA descobre o tema sozinha."}
+          {attachedFile ? "A IA identifica o tema sozinha ao ler o arquivo." : "Ou anexe um PDF ou PPTX de aula pelo clipe — a IA descobre o tema sozinha."}
         </p>
         {loading && (
           <p className="mt-3 text-sm text-muted-foreground">Isso costuma levar de 20 a 60 segundos.</p>
         )}
-        {!loading && !pdfFile && (
+        {!loading && !attachedFile && (
           <div className="mt-4 flex flex-wrap justify-center gap-2">
             {EXAMPLES.map((ex) => (
               <button

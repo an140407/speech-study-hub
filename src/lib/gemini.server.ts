@@ -117,7 +117,7 @@ async function callModel(topic: string): Promise<string> {
           contents: [{ role: "user", parts: [{ text: userPrompt }] }],
           // 32000 é o mesmo valor que o MedReview usa — o padrão da API (sem isso)
           // já cortou material grande no passado (ver histórico do MedReview).
-          generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 32000 },
+          generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 50000 },
         }),
       },
     );
@@ -248,12 +248,15 @@ export async function generateStudyMaterial(topic: string): Promise<GeneratedMat
   throw new Error("A IA devolveu um formato inesperado. Tente novamente.");
 }
 
-/** Gera material a partir de um PDF (aula/slide). Só funciona com GEMINI_API_KEY própria —
- *  o gateway do Lovable (chat/completions) não tem um formato confirmado pra anexar documentos. */
-export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<GeneratedMaterial & { topic_title: string }> {
+type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
+
+/** Núcleo compartilhado: manda as partes (texto e/ou documento) pro Gemini, valida e devolve
+ *  o material + o título identificado. Usado tanto pra PDF (inlineData) quanto pra texto puro
+ *  (PPTX já extraído, ou qualquer fonte futura). */
+async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): Promise<GeneratedMaterial & { topic_title: string }> {
   const geminiKey = process.env["GEMINI_API_KEY"];
   if (!geminiKey) {
-    throw new Error("Gerar a partir de PDF exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.");
+    throw new Error(`Gerar a partir de ${sourceLabel} exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.`);
   }
   const model = "gemini-3.1-flash-lite";
   let lastError: unknown;
@@ -263,21 +266,13 @@ export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<G
       headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: SYSTEM_PROMPT_PDF }] },
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },
-              { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
-            ],
-          },
-        ],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.6, maxOutputTokens: 32000 },
+        contents: [{ role: "user", parts: userParts }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.6, maxOutputTokens: 50000 },
       }),
     });
     if (!res.ok) {
       const body = await res.text();
-      console.error("Gemini PDF error", res.status, body);
+      console.error(`Gemini ${sourceLabel} error`, res.status, body);
       lastError = new Error(`Erro na API do Gemini (${res.status}).`);
       continue;
     }
@@ -289,14 +284,42 @@ export async function generateStudyMaterialFromPdf(pdfBase64: string): Promise<G
     const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
     try {
       const parsed = JSON.parse(extractJson(raw)) as Record<string, unknown>;
-      const topic_title = String(parsed["topic_title"] ?? "").trim() || "Tema do PDF";
+      const topic_title = String(parsed["topic_title"] ?? "").trim() || `Tema do ${sourceLabel}`;
       const material = validate(parsed);
       return { ...material, topic_title };
     } catch (e) {
       lastError = e;
-      console.error(`PDF parse/validate failed (attempt ${attempt + 1})`, e, raw.slice(0, 300));
+      console.error(`${sourceLabel} parse/validate failed (attempt ${attempt + 1})`, e, raw.slice(0, 300));
     }
   }
   console.error(lastError);
-  throw new Error("A IA não conseguiu processar esse PDF. Tente outro arquivo ou um tema digitado.");
+  throw new Error(`A IA não conseguiu processar esse ${sourceLabel}. Tente outro arquivo ou um tema digitado.`);
+}
+
+/** Gera material a partir de um PDF (aula/slide) — o Gemini lê o documento visualmente.
+ *  Só funciona com GEMINI_API_KEY própria — o gateway do Lovable não tem formato
+ *  confirmado pra anexar documentos. */
+export async function generateStudyMaterialFromPdf(pdfBase64: string) {
+  return generateFromParts(
+    [
+      { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },
+      { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
+    ],
+    "PDF",
+  );
+}
+
+/** Gera material a partir de texto já extraído (ex.: PPTX, cujo conteúdo o Gemini não lê
+ *  como documento nativo — só o texto das caixas dos slides chega até aqui). */
+export async function generateStudyMaterialFromText(extractedText: string) {
+  return generateFromParts(
+    [
+      {
+        text:
+          "Gere o material de estudo com base neste texto extraído de uma apresentação de slides " +
+          `de Fonoaudiologia (só o texto das caixas foi extraído — imagens e diagramas não estão aqui):\n\n${extractedText}`,
+      },
+    ],
+    "PPTX",
+  );
 }
