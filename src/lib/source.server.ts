@@ -65,7 +65,7 @@ export async function storeSourcePdf(hash: string, kind: SourceKind, pdf: Uint8A
   if (error) throw new Error("Não foi possível guardar o arquivo.");
   await supabaseAdmin
     .from("source_files")
-    .upsert({ hash, kind, storage_path, size_bytes: pdf.length, text });
+    .upsert({ hash, kind, storage_path, size_bytes: pdf.length, text: text || null });
   return storage_path;
 }
 
@@ -91,6 +91,14 @@ export async function saveSummaryHtml(topicId: string, html: string) {
     .select("id");
   if (!data?.length) {
     await supabaseAdmin.from("materials").insert({ topic_id: topicId, type: "summary", content: { html } });
+  }
+}
+
+/** Transcrição chega depois (etapa em segundo plano): salva no tópico e no cache do arquivo guardado. */
+export async function saveTopicSourceText(topicId: string, text: string, hash: string | null) {
+  await supabaseAdmin.from("topics").update({ source_text: text }).eq("id", topicId);
+  if (hash) {
+    await supabaseAdmin.from("source_files").update({ text }).eq("hash", hash).is("text", null);
   }
 }
 

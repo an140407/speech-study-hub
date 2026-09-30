@@ -6,7 +6,7 @@ import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "luc
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMaterial } from "@/lib/study.functions";
-import { deleteTopic, generateMaterialFromSource, prepareSourceUpload } from "@/lib/source.functions";
+import { createTopicFromSource, deleteTopic, ingestSource, prepareSourceUpload, transcribeTopicSource } from "@/lib/source.functions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +41,9 @@ function Index() {
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
   const prepareUpload = useServerFn(prepareSourceUpload);
-  const generateFromSource = useServerFn(generateMaterialFromSource);
+  const ingest = useServerFn(ingestSource);
+  const createTopic = useServerFn(createTopicFromSource);
+  const transcribe = useServerFn(transcribeTopicSource);
   const removeTopic = useServerFn(deleteTopic);
 
   const [search, setSearch] = useState("");
@@ -149,11 +151,21 @@ function Index() {
       if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
       uploadPath = prep.path;
     }
-    setStage(keepFile && kind === "pptx" ? "Gerando o material e convertendo o PPTX…" : "Gerando o material…");
-    const res = await generateFromSource({
-      data: { hash, kind, name: file.name, keep: keepFile, upload_path: uploadPath },
+    setStage(keepFile && kind === "pptx" ? "Preparando e convertendo o PPTX…" : "Preparando o arquivo…");
+    const ing = await ingest({ data: { hash, kind, keep: keepFile, upload_path: uploadPath } });
+    if (ing.warning) toast.warning(ing.warning);
+
+    setStage("Gerando o material…");
+    const res = await createTopic({
+      data: { hash, kind, name: file.name, keep: keepFile, file_uri: ing.file_uri, text: ing.text },
     });
-    if (res.warning) toast.warning(res.warning);
+
+    // Transcrição da aula em segundo plano (não trava a abertura do tópico).
+    if (res.needs_transcription && ing.file_uri) {
+      transcribe({ data: { topic_id: res.topic_id, file_uri: ing.file_uri } }).catch((e) =>
+        console.error("Transcrição em segundo plano falhou", e),
+      );
+    }
     return res;
   }
 

@@ -15,6 +15,7 @@ import {
   removeObjects,
   saveGeneratedMaterial,
   saveSummaryHtml,
+  saveTopicSourceText,
   setTopicSource,
   sha256Hex,
   signedSourceUrl,
@@ -42,8 +43,70 @@ export const prepareSourceUpload = createServerFn({ method: "POST" })
     return { mode: "upload" as const, path, token };
   });
 
-/** Passo 2: verifica, gera o material, guarda (ou não) o arquivo e apaga o temporário. */
-export const generateMaterialFromSource = createServerFn({ method: "POST" })
+const FILE_URI_RE = /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[A-Za-z0-9_-]+$/;
+
+/** Etapa 1 (curta): verifica o arquivo, envia pro Gemini, guarda/converte se pedido e apaga o temporário.
+ *  Não gera nada com IA aqui, pra caber no tempo máximo de uma requisição. */
+export const ingestSource = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) =>
+    z
+      .object({
+        hash: hashSchema,
+        kind: kindSchema,
+        keep: z.boolean(),
+        upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\.(pdf|pptx)$/).nullable(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const warnings: string[] = [];
+    try {
+      const existing = await findSourceFile(data.hash);
+      const kind: SourceKind = existing?.kind === "pdf" || existing?.kind === "pptx" ? existing.kind : data.kind;
+
+      // Cópia já guardada por alguém: reaproveita sem novo envio.
+      if (!data.upload_path) {
+        if (!existing) throw new Error("Arquivo não encontrado. Envie de novo.");
+        if (kind === "pptx" && existing.text) return { file_uri: null, text: existing.text, warning: null };
+        const fileUri = await uploadToGemini(await downloadObject(existing.storage_path));
+        return { file_uri: fileUri, text: existing.text ?? null, warning: null };
+      }
+
+      const bytes = await downloadObject(data.upload_path);
+      if (bytes.length > MAX_SOURCE_BYTES) throw new Error("Arquivo maior que 50MB.");
+      if ((await sha256Hex(bytes)) !== data.hash) {
+        throw new Error("O arquivo enviado não confere com o original. Tente enviar de novo.");
+      }
+
+      if (kind === "pdf") {
+        const fileUri = await uploadToGemini(bytes);
+        if (data.keep && !existing) {
+          await storeSourcePdf(data.hash, "pdf", bytes, "").catch((e) => {
+            console.error("Falha ao guardar", e);
+            warnings.push("Não foi possível guardar o arquivo original — o tópico será criado sem a prévia.");
+          });
+        }
+        return { file_uri: fileUri, text: null, warning: warnings.join(" ") || null };
+      }
+
+      const text = await extractPptxText(bytes);
+      if (data.keep && !existing) {
+        try {
+          await storeSourcePdf(data.hash, "pptx", await convertPptxToPdf(bytes), text);
+        } catch (e) {
+          console.error("Conversão/armazenamento falhou", e);
+          warnings.push("Não foi possível converter o PPTX pra PDF — o tópico será criado sem a prévia do material.");
+        }
+      }
+      return { file_uri: null, text, warning: warnings.join(" ") || null };
+    } finally {
+      if (data.upload_path) await removeObjects([data.upload_path]).catch(() => undefined);
+    }
+  });
+
+/** Etapa 2: gera o material com IA e cria o tópico (liga ao arquivo guardado só se ele existir de fato). */
+export const createTopicFromSource = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
     z
@@ -52,93 +115,46 @@ export const generateMaterialFromSource = createServerFn({ method: "POST" })
         kind: kindSchema,
         name: z.string().trim().min(1).max(200),
         keep: z.boolean(),
-        upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\.(pdf|pptx)$/).nullable(),
+        file_uri: z.string().regex(FILE_URI_RE).nullable(),
+        text: z.string().max(300_000).nullable(),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const warnings: string[] = [];
-    try {
-      const existing = await findSourceFile(data.hash);
-      let bytes: Uint8Array | null = null;
+    const material = data.file_uri
+      ? await generateStudyMaterialFromPdfUri(data.file_uri)
+      : data.text?.trim()
+        ? await generateStudyMaterialFromText(data.text)
+        : null;
+    if (!material) throw new Error("Não foi possível ler o conteúdo do arquivo.");
 
-      if (data.upload_path) {
-        bytes = await downloadObject(data.upload_path);
-        if (bytes.length > MAX_SOURCE_BYTES) throw new Error("Arquivo maior que 50MB.");
-        if ((await sha256Hex(bytes)) !== data.hash) {
-          throw new Error("O arquivo enviado não confere com o original. Tente enviar de novo.");
-        }
-      } else if (!existing) {
-        throw new Error("Arquivo não encontrado. Envie de novo.");
-      }
+    const topic_id = await saveGeneratedMaterial(context.supabase, material.topic_title, material);
+    const stored = data.keep ? await findSourceFile(data.hash) : null;
+    await setTopicSource(topic_id, {
+      source_kind: data.kind,
+      source_name: data.name,
+      source_text: data.text ?? "",
+      source_hash: stored ? data.hash : null,
+    });
+    return { topic_id, needs_transcription: !!data.file_uri && !data.text?.trim() };
+  });
 
-      const kind: SourceKind = existing?.kind === "pptx" || existing?.kind === "pdf" ? existing.kind : data.kind;
-      let material;
-      let sourceText = "";
-      let pdfToStore: Uint8Array | null = null;
-
-      if (bytes && kind === "pdf") {
-        const fileUri = await uploadToGemini(bytes);
-        const [m, t] = await Promise.all([
-          generateStudyMaterialFromPdfUri(fileUri),
-          transcribePdf(fileUri).catch((e) => {
-            console.error("Transcrição falhou", e);
-            return "";
-          }),
-        ]);
-        material = m;
-        sourceText = t;
-        pdfToStore = bytes;
-      } else if (bytes && kind === "pptx") {
-        sourceText = await extractPptxText(bytes);
-        material = await generateStudyMaterialFromText(sourceText);
-        if (data.keep && !existing) {
-          try {
-            pdfToStore = await convertPptxToPdf(bytes);
-          } catch (e) {
-            console.error("Conversão falhou", e);
-            warnings.push("Não foi possível converter o PPTX pra PDF — o tópico foi criado, mas sem a prévia do material.");
-          }
-        }
-      } else if (existing) {
-        // Cópia já guardada por alguém: reaproveita arquivo e texto, sem novo envio.
-        sourceText = existing.text ?? "";
-        if (kind === "pptx" && sourceText) {
-          material = await generateStudyMaterialFromText(sourceText);
-        } else {
-          const fileUri = await uploadToGemini(await downloadObject(existing.storage_path));
-          material = await generateStudyMaterialFromPdfUri(fileUri);
-        }
-      } else {
-        throw new Error("Arquivo não encontrado. Envie de novo.");
-      }
-
-      let linkHash: string | null = null;
-      if (data.keep) {
-        if (existing) {
-          linkHash = data.hash;
-        } else if (pdfToStore) {
-          try {
-            await storeSourcePdf(data.hash, kind, pdfToStore, sourceText);
-            linkHash = data.hash;
-          } catch (e) {
-            console.error("Falha ao guardar", e);
-            warnings.push("Não foi possível guardar o arquivo original — o tópico foi criado sem a prévia.");
-          }
-        }
-      }
-
-      const topic_id = await saveGeneratedMaterial(context.supabase, material.topic_title, material);
-      await setTopicSource(topic_id, {
-        source_kind: kind,
-        source_name: data.name,
-        source_text: sourceText,
-        source_hash: linkHash,
-      });
-      return { topic_id, warning: warnings.join(" ") || null };
-    } finally {
-      if (data.upload_path) await removeObjects([data.upload_path]).catch(() => undefined);
-    }
+/** Etapa 3 (segundo plano): transcreve o PDF pra o resumo sob demanda ter o conteúdo da aula. */
+export const transcribeTopicSource = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) =>
+    z.object({ topic_id: z.string().uuid(), file_uri: z.string().regex(FILE_URI_RE) }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: topic } = await context.supabase
+      .from("topics")
+      .select("id, source_hash")
+      .eq("id", data.topic_id)
+      .maybeSingle();
+    if (!topic) throw new Error("Tópico não encontrado.");
+    const text = await transcribePdf(data.file_uri);
+    if (text) await saveTopicSourceText(topic.id, text, topic.source_hash);
+    return { ok: true };
   });
 
 /** Link temporário (10 min) do PDF guardado — só pra quem tem esse arquivo num tópico próprio. */
