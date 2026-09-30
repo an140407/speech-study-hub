@@ -28,7 +28,7 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
         const pdfjs = await import("pdfjs-dist");
         const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
         pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-        loaded = (await pdfjs.getDocument(url).promise) as unknown as PdfDoc;
+        loaded = (await pdfjs.getDocument({ url }).promise) as unknown as PdfDoc;
         if (cancelled) loaded.destroy();
         else setDoc(loaded);
       } catch {
