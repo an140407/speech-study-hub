@@ -33,6 +33,7 @@ export function ResumoEditor({ topicId, html, maskMode }: { topicId: string; htm
     ],
     content: html,
     editable: false,
+    shouldRerenderOnTransaction: true,
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");
       if (timer.current) clearTimeout(timer.current);
