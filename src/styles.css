@@ -258,3 +258,32 @@ mark.fono-highlight {
     display: none;
   }
 }
+/* Tabelas no editor do Resumo */
+.resumo-editor .tableWrapper {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+.resumo-editor table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.resumo-editor th,
+.resumo-editor td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  min-width: 6rem;
+}
+.resumo-editor th {
+  background: var(--muted);
+  font-weight: 600;
+  text-align: left;
+}
+.resumo-editor th p,
+.resumo-editor td p {
+  margin: 0;
+}
+.resumo-editor .selectedCell {
+  background: var(--accent);
+}
