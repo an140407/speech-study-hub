@@ -2,7 +2,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
-import { Bold, Italic, Highlighter as HighlighterIcon, List, Heading2, Heading3, Pilcrow, Pencil, Check } from "lucide-react";
+import { Table, TableRow, TableHeader, TableCell } from "@tiptap/extension-table";
+import {
+  Bold, Italic, Highlighter as HighlighterIcon, List, Heading2, Heading3, Pilcrow, Pencil, Check,
+  Table as TableIcon, BetweenHorizontalEnd, BetweenVerticalEnd, Rows3, Columns3, Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -22,9 +26,14 @@ export function ResumoEditor({ topicId, html, maskMode }: { topicId: string; htm
     extensions: [
       StarterKit.configure({ heading: { levels: [2, 3] } }),
       Highlight.configure({ HTMLAttributes: { class: "fono-highlight" } }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
     content: html,
     editable: false,
+    shouldRerenderOnTransaction: true,
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");
       if (timer.current) clearTimeout(timer.current);
@@ -84,6 +93,29 @@ export function ResumoEditor({ topicId, html, maskMode }: { topicId: string; htm
             <ToolbarBtn active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()} title="Lista (Ctrl+Shift+8)">
               <List className="size-4" />
             </ToolbarBtn>
+            <div className="mx-1 h-5 w-px bg-border" />
+            <ToolbarBtn active={false} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Inserir tabela">
+              <TableIcon className="size-4" />
+            </ToolbarBtn>
+            {editor.isActive("table") && (
+              <>
+                <ToolbarBtn active={false} onClick={() => editor.chain().focus().addRowAfter().run()} title="Adicionar linha abaixo">
+                  <BetweenHorizontalEnd className="size-4" />
+                </ToolbarBtn>
+                <ToolbarBtn active={false} onClick={() => editor.chain().focus().addColumnAfter().run()} title="Adicionar coluna à direita">
+                  <BetweenVerticalEnd className="size-4" />
+                </ToolbarBtn>
+                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteRow().run()} title="Remover linha">
+                  <Rows3 className="size-4" />
+                </ToolbarBtn>
+                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteColumn().run()} title="Remover coluna">
+                  <Columns3 className="size-4" />
+                </ToolbarBtn>
+                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteTable().run()} title="Excluir tabela">
+                  <Trash2 className="size-4" />
+                </ToolbarBtn>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2 pr-1">
             <span className="text-xs text-muted-foreground">
