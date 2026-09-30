@@ -22,15 +22,30 @@ export function ResumoEditor({
   html,
   maskMode,
   startEditing = false,
+  readActions,
+  onEditingDone,
 }: {
   topicId: string;
   html: string;
   maskMode: boolean;
   startEditing?: boolean;
+  /** Botões extras na linha do cabeçalho em modo leitura (ex.: Regenerar, Material original). */
+  readActions?: ReactNode;
+  /** Chamado ao clicar em Concluir, já com o conteúdo salvo. */
+  onEditingDone?: (html: string) => void;
 }) {
   const [editing, setEditing] = useState(startEditing);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function save(content: string) {
+    const { error } = await supabase
+      .from("materials")
+      .update({ content: { html: content } })
+      .eq("topic_id", topicId)
+      .eq("type", "summary");
+    setStatus(error ? "idle" : "saved");
+  }
 
   const editor = useEditor({
     extensions: [
@@ -47,14 +62,7 @@ export function ResumoEditor({
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(async () => {
-        const { error } = await supabase
-          .from("materials")
-          .update({ content: { html: ed.getHTML() } })
-          .eq("topic_id", topicId)
-          .eq("type", "summary");
-        setStatus(error ? "idle" : "saved");
-      }, 800);
+      timer.current = setTimeout(() => void save(ed.getHTML()), 800);
     },
   });
 
@@ -131,14 +139,28 @@ export function ResumoEditor({
             <span className="text-xs text-muted-foreground">
               {status === "saving" ? "Salvando…" : status === "saved" ? "Salvo" : ""}
             </span>
-            <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                if (timer.current) {
+                  clearTimeout(timer.current);
+                  timer.current = null;
+                }
+                const content = editor.getHTML();
+                await save(content);
+                setEditing(false);
+                onEditingDone?.(content);
+              }}
+            >
               <Check className="size-4" /> Concluir
             </Button>
           </div>
         </div>
       )}
       {!editing && (
-        <div className="mb-3 flex justify-end">
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+          {readActions}
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             <Pencil className="size-4" /> Editar
           </Button>

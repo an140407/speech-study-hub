@@ -116,8 +116,22 @@ export async function setTopicSource(
 }
 
 // ---------------------------------------------------------------- Conversão PPTX → PDF
+// Cloudmersive (plano gratuito: arquivos até 3,5MB, 600/mês) pros pequenos;
+// CloudConvert (plano gratuito: até 1GB, 10/dia) pros maiores, em modo assíncrono.
 
-export async function convertPptxToPdf(pptx: Uint8Array): Promise<Uint8Array> {
+const CLOUDMERSIVE_MAX_BYTES = 3.5 * 1024 * 1024;
+
+function assertPdf(bytes: Uint8Array) {
+  if (bytes.length < 5 || String.fromCharCode(...bytes.slice(0, 4)) !== "%PDF") {
+    throw new Error("A conversão não devolveu um PDF válido.");
+  }
+}
+
+export function canConvertInline(size: number) {
+  return size <= CLOUDMERSIVE_MAX_BYTES && !!process.env["CLOUDMERSIVE_API_KEY"];
+}
+
+export async function convertWithCloudmersive(pptx: Uint8Array): Promise<Uint8Array> {
   const key = process.env["CLOUDMERSIVE_API_KEY"];
   if (!key) throw new Error("CLOUDMERSIVE_API_KEY não configurada.");
   const form = new FormData();
@@ -128,15 +142,70 @@ export async function convertPptxToPdf(pptx: Uint8Array): Promise<Uint8Array> {
     body: form,
   });
   if (!res.ok) {
-    console.error("Cloudmersive error", res.status, await res.text());
-    throw new Error(`Falha na conversão (${res.status}).`);
+    console.error("Cloudmersive error", res.status, (await res.text()).slice(0, 300));
+    throw new Error(`Cloudmersive recusou a conversão (erro ${res.status}).`);
   }
   const out = new Uint8Array(await res.arrayBuffer());
-  // PDF válido sempre começa com "%PDF".
-  if (out.length < 5 || String.fromCharCode(...out.slice(0, 4)) !== "%PDF") {
-    throw new Error("A conversão não devolveu um PDF válido.");
-  }
+  assertPdf(out);
   return out;
+}
+
+function cloudConvertKey() {
+  const key = process.env["CLOUDCONVERT_API_KEY"];
+  if (!key) throw new Error("PPTX acima de 3,5MB precisa da CloudConvert, e a CLOUDCONVERT_API_KEY não está configurada.");
+  return key;
+}
+
+/** Cria o job na CloudConvert (volta na hora). A CloudConvert busca o PPTX por um link temporário do Storage. */
+export async function startCloudConvertJob(storagePath: string): Promise<string> {
+  const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(storagePath, 3600);
+  if (error || !data) throw new Error("Não foi possível preparar o arquivo pra conversão.");
+  const res = await fetch("https://api.cloudconvert.com/v2/jobs", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cloudConvertKey()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tasks: {
+        "import-pptx": { operation: "import/url", url: data.signedUrl, filename: "aula.pptx" },
+        "convert-pdf": { operation: "convert", input: "import-pptx", input_format: "pptx", output_format: "pdf" },
+        "export-pdf": { operation: "export/url", input: "convert-pdf" },
+      },
+    }),
+  });
+  if (!res.ok) {
+    console.error("CloudConvert create error", res.status, (await res.text()).slice(0, 300));
+    throw new Error(`CloudConvert recusou a conversão (erro ${res.status}).`);
+  }
+  const job = (await res.json()) as { data?: { id?: string } };
+  if (!job.data?.id) throw new Error("CloudConvert não devolveu o job.");
+  return job.data.id;
+}
+
+type CCTask = { operation: string; status: string; message?: string; result?: { files?: { url: string }[] } };
+
+/** Consulta o job: "pending" enquanto processa; o PDF quando termina; erro com o motivo quando falha. */
+export async function checkCloudConvertJob(jobId: string): Promise<{ status: "pending" } | { status: "done"; pdf: Uint8Array }> {
+  const res = await fetch(`https://api.cloudconvert.com/v2/jobs/${encodeURIComponent(jobId)}`, {
+    headers: { Authorization: `Bearer ${cloudConvertKey()}` },
+  });
+  if (!res.ok) throw new Error(`Falha ao consultar a conversão (erro ${res.status}).`);
+  const job = (await res.json()) as { data?: { status?: string; tasks?: CCTask[] } };
+  const status = job.data?.status;
+  if (status === "error") {
+    const failed = job.data?.tasks?.find((t) => t.status === "error");
+    throw new Error(`A conversão falhou${failed?.message ? `: ${failed.message}` : "."}`);
+  }
+  if (status !== "finished") return { status: "pending" };
+  const url = job.data?.tasks?.find((t) => t.operation === "export/url")?.result?.files?.[0]?.url;
+  if (!url) throw new Error("A conversão terminou sem arquivo de saída.");
+  const pdfRes = await fetch(url);
+  if (!pdfRes.ok) throw new Error("Não foi possível baixar o PDF convertido.");
+  const pdf = new Uint8Array(await pdfRes.arrayBuffer());
+  assertPdf(pdf);
+  return { status: "done", pdf };
+}
+
+export async function linkTopicSource(topicId: string, hash: string) {
+  await supabaseAdmin.from("topics").update({ source_hash: hash }).eq("id", topicId);
 }
 
 // ---------------------------------------------------------------- Gemini: transcrição e resumo

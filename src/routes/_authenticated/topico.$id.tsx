@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { backfillSubtopics } from "@/lib/study-extra.functions";
-import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Loader2, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { markdownToHtml } from "@/lib/markdown-to-html";
@@ -40,6 +40,13 @@ export const Route = createFileRoute("/_authenticated/topico/$id")({
   }),
   component: TopicPage,
 });
+
+/** Resumo sem texto (ex.: "<p></p>" de quem abriu o editor e não escreveu) conta como vazio. */
+function isEmptyHtml(html: string) {
+  if (!html) return true;
+  if (/<(table|img)\b/i.test(html)) return false;
+  return !html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+}
 
 async function loadTopic(id: string) {
   const [topic, materials, flashcards, mcq, cases] = await Promise.all([
@@ -154,6 +161,8 @@ function TopicPage() {
   const sourceUrlFn = useServerFn(getSourceFileUrl);
   const removeTopic = useServerFn(deleteTopicFn);
   const hasSource = !!q.data?.topic.source_hash;
+  // Conversão de PPTX rodando em segundo plano (marcada pela Home ao criar o tópico).
+  const sourcePending = useQuery({ queryKey: ["source-pending", id], queryFn: () => false, enabled: false });
 
   const summaryGen = useMutation({
     mutationFn: () => genSummary({ data: { topic_id: id } }),
@@ -289,7 +298,7 @@ function TopicPage() {
             viewerOpen={viewerOpen}
             onOpenViewer={() => setViewerOpen(true)}
             viewer={
-              hasSource ? (
+              hasSource && viewerOpen ? (
                 <SourcePdfViewer
                   url={sourceUrl.data ?? null}
                   loading={sourceUrl.isLoading}
@@ -297,30 +306,57 @@ function TopicPage() {
                 />
               ) : null
             }
-            summary={
-              !d.summaryHtml && d.summaryText.trim() ? (
-                <div className="card-soft p-6 text-muted-foreground">Preparando o editor…</div>
-              ) : d.summaryHtml || writingOwn ? (
-                <div className="card-soft p-4 md:p-6">
-                  <div className="mb-3 flex justify-end">
-                    <RegenerateSummaryButton onConfirm={() => summaryGen.mutate()} generating={summaryGen.isPending} />
+            summary={(() => {
+              const materialButton = sourcePending.data ? (
+                <Button size="sm" variant="outline" disabled>
+                  <Loader2 className="size-4 animate-spin" /> Convertendo material…
+                </Button>
+              ) : hasSource && !viewerOpen ? (
+                <Button size="sm" variant="outline" onClick={() => setViewerOpen(true)}>
+                  <FileText className="size-4" /> Material original
+                </Button>
+              ) : null;
+              const hasContent = !isEmptyHtml(d.summaryHtml);
+
+              if (!d.summaryHtml && d.summaryText.trim()) {
+                return <div className="card-soft p-6 text-muted-foreground">Preparando o editor…</div>;
+              }
+              if (hasContent || writingOwn) {
+                return (
+                  <div className="card-soft p-4 md:p-6">
+                    <ResumoEditor
+                      key={`resumo-${summaryVersion}`}
+                      topicId={id}
+                      html={d.summaryHtml || "<p></p>"}
+                      maskMode={maskMode}
+                      startEditing={writingOwn && !hasContent}
+                      onEditingDone={(html) => {
+                        if (isEmptyHtml(html)) setWritingOwn(false);
+                        queryClient.invalidateQueries({ queryKey: ["topic", id] });
+                      }}
+                      readActions={
+                        <>
+                          {materialButton}
+                          {hasContent && (
+                            <RegenerateSummaryButton onConfirm={() => summaryGen.mutate()} generating={summaryGen.isPending} />
+                          )}
+                        </>
+                      }
+                    />
                   </div>
-                  <ResumoEditor
-                    key={`resumo-${summaryVersion}`}
-                    topicId={id}
-                    html={d.summaryHtml || "<p></p>"}
-                    maskMode={maskMode}
-                    startEditing={writingOwn && !d.summaryHtml}
+                );
+              }
+              return (
+                <div className="space-y-3">
+                  {materialButton && <div className="flex justify-end">{materialButton}</div>}
+                  <ResumoEmptyState
+                    onWriteOwn={() => setWritingOwn(true)}
+                    onGenerate={() => summaryGen.mutate()}
+                    generating={summaryGen.isPending}
                   />
                 </div>
-              ) : (
-                <ResumoEmptyState
-                  onWriteOwn={() => setWritingOwn(true)}
-                  onGenerate={() => summaryGen.mutate()}
-                  generating={summaryGen.isPending}
-                />
-              )
-            }
+              );
+            })()}
           />
         </TabsContent>
         <TabsContent value="mapa" className="mt-4 animate-fade-up">

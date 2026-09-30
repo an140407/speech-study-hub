@@ -6,7 +6,15 @@ import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "luc
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMaterial } from "@/lib/study.functions";
-import { createTopicFromSource, deleteTopic, ingestSource, prepareSourceUpload, transcribeTopicSource } from "@/lib/source.functions";
+import {
+  createTopicFromSource,
+  deleteTopic,
+  ingestSource,
+  pollTopicConversion,
+  prepareSourceUpload,
+  startTopicConversion,
+  transcribeTopicSource,
+} from "@/lib/source.functions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +52,35 @@ function Index() {
   const ingest = useServerFn(ingestSource);
   const createTopic = useServerFn(createTopicFromSource);
   const transcribe = useServerFn(transcribeTopicSource);
+  const startConversion = useServerFn(startTopicConversion);
+  const pollConversion = useServerFn(pollTopicConversion);
+
+  /** Converte o PPTX em segundo plano (o tópico já abriu). Grandes: acompanha o job a cada 5s, até 10 min. */
+  async function convertInBackground(topicId: string, hash: string, uploadPath: string) {
+    const key = ["source-pending", topicId];
+    queryClient.setQueryData(key, true);
+    try {
+      const input = { topic_id: topicId, hash, upload_path: uploadPath };
+      const started = await startConversion({ data: input });
+      if (started.status === "pending" && started.job_id) {
+        const deadline = Date.now() + 10 * 60 * 1000;
+        let done = false;
+        while (!done) {
+          if (Date.now() > deadline) throw new Error("a conversão demorou demais");
+          await new Promise((r) => setTimeout(r, 5000));
+          done = (await pollConversion({ data: { ...input, job_id: started.job_id } })).status === "done";
+        }
+      }
+      toast.success("Material original pronto — já dá pra ver junto do resumo.");
+    } catch (e) {
+      toast.warning(
+        `Não foi possível converter o PPTX pra PDF (${e instanceof Error ? e.message : "erro desconhecido"}). O tópico continua normal, só sem a prévia do material.`,
+      );
+    } finally {
+      queryClient.setQueryData(key, false);
+      queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
+    }
+  }
   const removeTopic = useServerFn(deleteTopic);
 
   const [search, setSearch] = useState("");
@@ -151,7 +188,7 @@ function Index() {
       if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
       uploadPath = prep.path;
     }
-    setStage(keepFile && kind === "pptx" ? "Preparando e convertendo o PPTX…" : "Preparando o arquivo…");
+    setStage("Preparando o arquivo…");
     const ing = await ingest({ data: { hash, kind, keep: keepFile, upload_path: uploadPath } });
     if (ing.warning) toast.warning(ing.warning);
 
@@ -160,7 +197,8 @@ function Index() {
       data: { hash, kind, name: file.name, keep: keepFile, file_uri: ing.file_uri, text: ing.text },
     });
 
-    // Transcrição da aula em segundo plano (não trava a abertura do tópico).
+    // Conversão do PPTX e transcrição da aula em segundo plano (não travam a abertura do tópico).
+    if (ing.convert_path) void convertInBackground(res.topic_id, hash, ing.convert_path);
     if (res.needs_transcription && ing.file_uri) {
       transcribe({ data: { topic_id: res.topic_id, file_uri: ing.file_uri } }).catch((e) =>
         console.error("Transcrição em segundo plano falhou", e),

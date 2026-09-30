@@ -1,12 +1,18 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateStudyMaterialFromPdfUri, generateStudyMaterialFromText } from "./gemini.server";
 import { extractPptxText } from "./pptx.server";
 import {
   MAX_SOURCE_BYTES,
   cleanupStaleIncoming,
-  convertPptxToPdf,
+  canConvertInline,
+  checkCloudConvertJob,
+  convertWithCloudmersive,
+  linkTopicSource,
+  startCloudConvertJob,
   createUploadUrl,
   downloadObject,
   findSourceFile,
@@ -61,6 +67,7 @@ export const ingestSource = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const warnings: string[] = [];
+    let keepUpload = false;
     try {
       const existing = await findSourceFile(data.hash);
       const kind: SourceKind = existing?.kind === "pdf" || existing?.kind === "pptx" ? existing.kind : data.kind;
@@ -68,9 +75,9 @@ export const ingestSource = createServerFn({ method: "POST" })
       // Cópia já guardada por alguém: reaproveita sem novo envio.
       if (!data.upload_path) {
         if (!existing) throw new Error("Arquivo não encontrado. Envie de novo.");
-        if (kind === "pptx" && existing.text) return { file_uri: null, text: existing.text, warning: null };
+        if (kind === "pptx" && existing.text) return { file_uri: null, text: existing.text, convert_path: null, warning: null };
         const fileUri = await uploadToGemini(await downloadObject(existing.storage_path));
-        return { file_uri: fileUri, text: existing.text ?? null, warning: null };
+        return { file_uri: fileUri, text: existing.text ?? null, convert_path: null, warning: null };
       }
 
       const bytes = await downloadObject(data.upload_path);
@@ -87,21 +94,16 @@ export const ingestSource = createServerFn({ method: "POST" })
             warnings.push("Não foi possível guardar o arquivo original — o tópico será criado sem a prévia.");
           });
         }
-        return { file_uri: fileUri, text: null, warning: warnings.join(" ") || null };
+        return { file_uri: fileUri, text: null, convert_path: null, warning: warnings.join(" ") || null };
       }
 
       const text = await extractPptxText(bytes);
-      if (data.keep && !existing) {
-        try {
-          await storeSourcePdf(data.hash, "pptx", await convertPptxToPdf(bytes), text);
-        } catch (e) {
-          console.error("Conversão/armazenamento falhou", e);
-          warnings.push("Não foi possível converter o PPTX pra PDF — o tópico será criado sem a prévia do material.");
-        }
-      }
-      return { file_uri: null, text, warning: warnings.join(" ") || null };
+      // A conversão roda depois, em segundo plano (pode demorar): o PPTX fica no temporário até lá.
+      const convertPath = data.keep && !existing ? data.upload_path : null;
+      keepUpload = !!convertPath;
+      return { file_uri: null, text, convert_path: convertPath, warning: null };
     } finally {
-      if (data.upload_path) await removeObjects([data.upload_path]).catch(() => undefined);
+      if (data.upload_path && !keepUpload) await removeObjects([data.upload_path]).catch(() => undefined);
     }
   });
 
@@ -155,6 +157,68 @@ export const transcribeTopicSource = createServerFn({ method: "POST" })
     const text = await transcribePdf(data.file_uri);
     if (text) await saveTopicSourceText(topic.id, text, topic.source_hash);
     return { ok: true };
+  });
+
+const convertInput = z.object({
+  topic_id: z.string().uuid(),
+  hash: hashSchema,
+  upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\.pptx$/),
+});
+
+async function assertOwnTopic(supabase: SupabaseClient<Database>, topicId: string) {
+  const { data } = await supabase.from("topics").select("id, source_text, source_hash").eq("id", topicId).maybeSingle();
+  if (!data) throw new Error("Tópico não encontrado.");
+  return data;
+}
+
+async function finishConversion(topicId: string, hash: string, pdf: Uint8Array, text: string | null, uploadPath: string) {
+  await storeSourcePdf(hash, "pptx", pdf, text ?? "");
+  await linkTopicSource(topicId, hash);
+  await removeObjects([uploadPath]).catch(() => undefined);
+}
+
+/** Etapa 4a (segundo plano): converte o PPTX guardado. Pequeno: resolve na hora. Grande: abre um job e
+ *  devolve o id pra o navegador acompanhar em chamadas curtas. */
+export const startTopicConversion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => convertInput.parse(input))
+  .handler(async ({ data, context }) => {
+    const topic = await assertOwnTopic(context.supabase, data.topic_id);
+    try {
+      const existing = await findSourceFile(data.hash);
+      if (existing) {
+        await linkTopicSource(topic.id, data.hash);
+        await removeObjects([data.upload_path]).catch(() => undefined);
+        return { status: "done" as const, job_id: null };
+      }
+      const bytes = await downloadObject(data.upload_path);
+      if ((await sha256Hex(bytes)) !== data.hash) throw new Error("O arquivo enviado não confere com o original.");
+      if (canConvertInline(bytes.length)) {
+        await finishConversion(topic.id, data.hash, await convertWithCloudmersive(bytes), topic.source_text, data.upload_path);
+        return { status: "done" as const, job_id: null };
+      }
+      return { status: "pending" as const, job_id: await startCloudConvertJob(data.upload_path) };
+    } catch (e) {
+      await removeObjects([data.upload_path]).catch(() => undefined);
+      throw e;
+    }
+  });
+
+/** Etapa 4b (segundo plano): consulta o job; quando termina, guarda o PDF e liga ao tópico. */
+export const pollTopicConversion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => convertInput.extend({ job_id: z.string().min(1).max(100) }).parse(input))
+  .handler(async ({ data, context }) => {
+    const topic = await assertOwnTopic(context.supabase, data.topic_id);
+    try {
+      const res = await checkCloudConvertJob(data.job_id);
+      if (res.status === "pending") return { status: "pending" as const };
+      await finishConversion(topic.id, data.hash, res.pdf, topic.source_text, data.upload_path);
+      return { status: "done" as const };
+    } catch (e) {
+      await removeObjects([data.upload_path]).catch(() => undefined);
+      throw e;
+    }
   });
 
 /** Link temporário (10 min) do PDF guardado — só pra quem tem esse arquivo num tópico próprio. */
