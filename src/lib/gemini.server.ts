@@ -1,10 +1,8 @@
 import type { GeneratedMaterial } from "./study-types";
-import { base64ToUint8Array } from "./base64.server";
 
 const SYSTEM_PROMPT = `Você é um professor universitário de Fonoaudiologia no Brasil. Gere material de estudo em português do Brasil, com rigor acadêmico e linguagem clara para estudantes de graduação.
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
 {
-  "summary": "string em markdown simples (use ## para seções, listas com -, **negrito**); 400 a 700 palavras",
   "mindmap": { "topic": "string", "branches": [{ "title": "string", "children": ["string"] }] },
   "flashcards": [{ "front": "string", "back": "string", "subtopic": "string (deve ser igual ao title de um dos branches do mindmap)" }],
   "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string", "subtopic": "string (igual ao title de um dos branches do mindmap)" }],
@@ -21,7 +19,6 @@ const SYSTEM_PROMPT_PDF = `Você é um professor universitário de Fonoaudiologi
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
 {
   "topic_title": "string (o título curto e específico que você identificou)",
-  "summary": "string em markdown simples (use ## para seções, listas com -, **negrito**); 400 a 700 palavras",
   "mindmap": { "topic": "string", "branches": [{ "title": "string", "children": ["string"] }] },
   "flashcards": [{ "front": "string", "back": "string", "subtopic": "string (deve ser igual ao title de um dos branches do mindmap)" }],
   "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string", "subtopic": "string (igual ao title de um dos branches do mindmap)" }],
@@ -46,7 +43,7 @@ function extractJson(raw: string): string {
 
 function validate(data: unknown): GeneratedMaterial {
   const d = data as Partial<GeneratedMaterial>;
-  if (!d || typeof d.summary !== "string") throw new Error("JSON sem 'summary'.");
+  if (!d) throw new Error("JSON vazio.");
   if (!d.mindmap || !Array.isArray(d.mindmap.branches)) throw new Error("JSON sem 'mindmap'.");
   if (!Array.isArray(d.flashcards) || d.flashcards.length === 0) throw new Error("JSON sem 'flashcards'.");
   if (!Array.isArray(d.mcq) || d.mcq.length === 0) throw new Error("JSON sem 'mcq'.");
@@ -78,7 +75,7 @@ function validate(data: unknown): GeneratedMaterial {
     : [];
 
   return {
-    summary: d.summary,
+    summary: "", // resumo agora é gerado sob demanda, na aba Resumo
     mindmap: {
       topic: String(d.mindmap.topic ?? ""),
       branches: d.mindmap.branches.map((b) => ({
@@ -168,9 +165,8 @@ async function callModel(topic: string): Promise<string> {
 const JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "mindmap", "flashcards", "mcq", "clinical_case", "review_questions"],
+  required: ["mindmap", "flashcards", "mcq", "clinical_case", "review_questions"],
   properties: {
-    summary: { type: "string" },
     mindmap: {
       type: "object",
       additionalProperties: false,
@@ -257,8 +253,7 @@ type GeminiPart =
 /** Envia um PDF pra File API do Gemini (upload resumível em duas etapas) e devolve o
  *  file_uri pra referenciar na geração. Suporta até 50MB — bem mais que o limite de
  *  ~20MB de mandar o arquivo embutido direto na chamada (inlineData). */
-async function uploadPdfToGeminiFiles(pdfBase64: string, apiKey: string): Promise<string> {
-  const bytes = base64ToUint8Array(pdfBase64);
+export async function uploadPdfToGeminiFiles(bytes: Uint8Array, apiKey: string): Promise<string> {
   const startRes = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
     method: "POST",
     headers: {
@@ -345,12 +340,24 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
  *  O PDF é enviado primeiro pela File API (suporta até 50MB) e só a referência é usada
  *  na geração. Só funciona com GEMINI_API_KEY própria — o gateway do Lovable não tem
  *  formato confirmado pra anexar documentos. */
-export async function generateStudyMaterialFromPdf(pdfBase64: string) {
+/** Gera material a partir de um PDF já enviado à File API do Gemini (reaproveita o mesmo arquivo
+ *  pra transcrição e geração, sem enviar duas vezes). */
+export async function generateStudyMaterialFromPdfUri(fileUri: string) {
+  return generateFromParts(
+    [
+      { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },
+      { file_data: { mime_type: "application/pdf", file_uri: fileUri } },
+    ],
+    "PDF",
+  );
+}
+
+export async function generateStudyMaterialFromPdf(pdfBytes: Uint8Array) {
   const geminiKey = process.env["GEMINI_API_KEY"];
   if (!geminiKey) {
     throw new Error("Gerar a partir de PDF exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.");
   }
-  const fileUri = await uploadPdfToGeminiFiles(pdfBase64, geminiKey);
+  const fileUri = await uploadPdfToGeminiFiles(pdfBytes, geminiKey);
   return generateFromParts(
     [
       { text: "Gere o material de estudo com base neste PDF de aula de Fonoaudiologia." },

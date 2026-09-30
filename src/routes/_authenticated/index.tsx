@@ -5,7 +5,9 @@ import { useState } from "react";
 import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { generateMaterial, generateMaterialFromPdf, generateMaterialFromPptx } from "@/lib/study.functions";
+import { generateMaterial } from "@/lib/study.functions";
+import { deleteTopic, generateMaterialFromSource, prepareSourceUpload } from "@/lib/source.functions";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,11 +35,14 @@ function Index() {
   const [topic, setTopic] = useState("");
   const [attachedFile, setAttachedFile] = useState<{ file: File; kind: "pdf" | "pptx" } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [keepFile, setKeepFile] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const generate = useServerFn(generateMaterial);
-  const generateFromPdf = useServerFn(generateMaterialFromPdf);
-  const generateFromPptx = useServerFn(generateMaterialFromPptx);
+  const prepareUpload = useServerFn(prepareSourceUpload);
+  const generateFromSource = useServerFn(generateMaterialFromSource);
+  const removeTopic = useServerFn(deleteTopic);
 
   const [search, setSearch] = useState("");
 
@@ -87,9 +92,14 @@ function Index() {
   async function confirmDeleteTopic() {
     if (!deleteTarget) return;
     setDeleting(true);
-    const { error } = await supabase.from("topics").delete().eq("id", deleteTarget.id);
+    try {
+      await removeTopic({ data: { topic_id: deleteTarget.id } });
+    } catch {
+      setDeleting(false);
+      toast.error("Falha ao excluir o tópico.");
+      return;
+    }
     setDeleting(false);
-    if (error) { toast.error("Falha ao excluir o tópico."); return; }
     toast.success("Tópico excluído.");
     setDeleteTarget(null);
     queryClient.invalidateQueries({ queryKey: ["topics"] });
@@ -118,16 +128,33 @@ function Index() {
     setAttachedFile({ file, kind: isPdf ? "pdf" : "pptx" });
   }
 
-  function readAsBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        resolve(result.slice(result.indexOf(",") + 1));
-      };
-      reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
-      reader.readAsDataURL(file);
+  async function sha256Hex(file: File): Promise<string> {
+    const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  /** Envia o arquivo direto pro Storage (se ainda não existir cópia idêntica) e gera o material. */
+  async function generateFromFile(file: File, kind: "pdf" | "pptx") {
+    setStage("Lendo o arquivo…");
+    const hash = await sha256Hex(file);
+    const prep = await prepareUpload({ data: { hash, kind, size: file.size } });
+    let uploadPath: string | null = null;
+    if (prep.mode === "upload") {
+      setStage("Enviando o arquivo…");
+      const { error } = await supabase.storage
+        .from("source-files")
+        .uploadToSignedUrl(prep.path, prep.token, file, {
+          contentType: kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        });
+      if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
+      uploadPath = prep.path;
+    }
+    setStage(keepFile && kind === "pptx" ? "Gerando o material e convertendo o PPTX…" : "Gerando o material…");
+    const res = await generateFromSource({
+      data: { hash, kind, name: file.name, keep: keepFile, upload_path: uploadPath },
     });
+    if (res.warning) toast.warning(res.warning);
+    return res;
   }
 
   async function handleGenerate(e?: React.FormEvent) {
@@ -138,14 +165,9 @@ function Index() {
     }
     setLoading(true);
     try {
-      let res: { topic_id: string };
-      if (attachedFile?.kind === "pdf") {
-        res = await generateFromPdf({ data: { pdf_base64: await readAsBase64(attachedFile.file) } });
-      } else if (attachedFile?.kind === "pptx") {
-        res = await generateFromPptx({ data: { pptx_base64: await readAsBase64(attachedFile.file) } });
-      } else {
-        res = await generate({ data: { topic: topic.trim() } });
-      }
+      const res = attachedFile
+        ? await generateFromFile(attachedFile.file, attachedFile.kind)
+        : await generate({ data: { topic: topic.trim() } });
       await queryClient.invalidateQueries({ queryKey: ["topics"] });
       toast.success("Material gerado!");
       navigate({ to: "/topico/$id", params: { id: res.topic_id } });
@@ -153,6 +175,7 @@ function Index() {
       toast.error(err instanceof Error ? err.message : "Falha ao gerar o material.");
     } finally {
       setLoading(false);
+      setStage(null);
     }
   }
 
@@ -216,8 +239,16 @@ function Index() {
         <p className="mt-2 text-xs text-muted-foreground">
           {attachedFile ? "A IA identifica o tema sozinha ao ler o arquivo." : "Ou anexe um PDF ou PPTX de aula pelo clipe — a IA descobre o tema sozinha."}
         </p>
+        {attachedFile && (
+          <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={keepFile} onCheckedChange={(v) => setKeepFile(v === true)} disabled={loading} />
+            Guardar arquivo original{attachedFile.kind === "pptx" ? " (convertido em PDF)" : ""} pra ver junto do resumo
+          </label>
+        )}
         {loading && (
-          <p className="mt-3 text-sm text-muted-foreground">Isso costuma levar de 20 a 60 segundos.</p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {stage ?? "Gerando o material…"} Isso costuma levar de 20 a 90 segundos.
+          </p>
         )}
         {!loading && !attachedFile && (
           <div className="mt-4 flex flex-wrap justify-center gap-2">

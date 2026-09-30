@@ -250,26 +250,73 @@ export type Database = {
           },
         ]
       }
+      source_files: {
+        Row: {
+          created_at: string
+          hash: string
+          kind: string
+          size_bytes: number | null
+          storage_path: string
+          text: string | null
+        }
+        Insert: {
+          created_at?: string
+          hash: string
+          kind: string
+          size_bytes?: number | null
+          storage_path: string
+          text?: string | null
+        }
+        Update: {
+          created_at?: string
+          hash?: string
+          kind?: string
+          size_bytes?: number | null
+          storage_path?: string
+          text?: string | null
+        }
+        Relationships: []
+      }
       topics: {
         Row: {
           created_at: string
           id: string
+          source_hash: string | null
+          source_kind: string | null
+          source_name: string | null
+          source_text: string | null
           title: string
           user_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
+          source_hash?: string | null
+          source_kind?: string | null
+          source_name?: string | null
+          source_text?: string | null
           title: string
           user_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
+          source_hash?: string | null
+          source_kind?: string | null
+          source_name?: string | null
+          source_text?: string | null
           title?: string
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "topics_source_hash_fkey"
+            columns: ["source_hash"]
+            isOneToOne: false
+            referencedRelation: "source_files"
+            referencedColumns: ["hash"]
+          },
+        ]
       }
     }
     Views: {

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -9,6 +9,11 @@ import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { markdownToHtml } from "@/lib/markdown-to-html";
 import { ResumoEditor } from "@/components/study/ResumoEditor";
+import { ResumoEmptyState } from "@/components/study/ResumoEmptyState";
+import { RegenerateSummaryButton } from "@/components/study/RegenerateSummaryButton";
+import { ResumoSplitLayout } from "@/components/study/ResumoSplitLayout";
+import { SourcePdfViewer } from "@/components/study/SourcePdfViewer";
+import { deleteTopic as deleteTopicFn, generateSummary, getSourceFileUrl } from "@/lib/source.functions";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
@@ -38,7 +43,7 @@ export const Route = createFileRoute("/_authenticated/topico/$id")({
 
 async function loadTopic(id: string) {
   const [topic, materials, flashcards, mcq, cases] = await Promise.all([
-    supabase.from("topics").select("id, title, created_at").eq("id", id).single(),
+    supabase.from("topics").select("id, title, created_at, source_hash, source_kind, source_name").eq("id", id).single(),
     supabase.from("materials").select("type, content").eq("topic_id", id),
     supabase.from("flashcards").select("id, topic_id, front, back, subtopic, seen_at").eq("topic_id", id).order("created_at").order("id"),
     supabase.from("mcq_questions").select("id, topic_id, question, options, correct_index, explanation, subtopic, ai_explanation, seen_at").eq("topic_id", id).order("created_at").order("id"),
@@ -142,6 +147,32 @@ function TopicPage() {
   const backfill = useServerFn(backfillSubtopics);
   const backfilled = useRef(false);
   const summaryMigrated = useRef(false);
+  const [writingOwn, setWritingOwn] = useState(false);
+  const [summaryVersion, setSummaryVersion] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const genSummary = useServerFn(generateSummary);
+  const sourceUrlFn = useServerFn(getSourceFileUrl);
+  const removeTopic = useServerFn(deleteTopicFn);
+  const hasSource = !!q.data?.topic.source_hash;
+
+  const summaryGen = useMutation({
+    mutationFn: () => genSummary({ data: { topic_id: id } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["topic", id] });
+      setWritingOwn(false);
+      setSummaryVersion((v) => v + 1);
+      toast.success("Resumo gerado!");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Falha ao gerar o resumo."),
+  });
+
+  // Link temporário (10 min) do material original, pedido só quando a prévia é aberta.
+  const sourceUrl = useQuery({
+    queryKey: ["source-url", id],
+    enabled: viewerOpen && hasSource,
+    staleTime: 8 * 60 * 1000,
+    queryFn: async () => (await sourceUrlFn({ data: { topic_id: id } })).url,
+  });
 
   // Converte o resumo de markdown pra HTML uma única vez (pra ficar editável no TipTap).
   useEffect(() => {
@@ -160,9 +191,14 @@ function TopicPage() {
 
   async function deleteTopic() {
     setDeleting(true);
-    const { error } = await supabase.from("topics").delete().eq("id", id);
+    try {
+      await removeTopic({ data: { topic_id: id } });
+    } catch {
+      setDeleting(false);
+      toast.error("Falha ao excluir o tópico.");
+      return;
+    }
     setDeleting(false);
-    if (error) { toast.error("Falha ao excluir o tópico."); return; }
     queryClient.invalidateQueries({ queryKey: ["topics"] });
     navigate({ to: "/" });
   }
@@ -199,7 +235,7 @@ function TopicPage() {
   const d = q.data;
 
   return (
-    <main className="mx-auto max-w-4xl px-4 pb-20 pt-6">
+    <main className={`mx-auto px-4 pb-20 pt-6 ${viewerOpen && hasSource ? "max-w-7xl" : "max-w-4xl"}`}>
       <Link to="/" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> Tópicos
       </Link>
@@ -248,12 +284,44 @@ function TopicPage() {
           ))}
         </TabsList>
 
-        <TabsContent value="resumo" className="card-soft mt-4 animate-fade-up p-4 md:p-6">
-          {d.summaryHtml ? (
-            <ResumoEditor topicId={id} html={d.summaryHtml} maskMode={maskMode} />
-          ) : (
-            <p className="text-muted-foreground">Preparando o editor…</p>
-          )}
+        <TabsContent value="resumo" className="mt-4 animate-fade-up">
+          <ResumoSplitLayout
+            viewerOpen={viewerOpen}
+            onOpenViewer={() => setViewerOpen(true)}
+            viewer={
+              hasSource ? (
+                <SourcePdfViewer
+                  url={sourceUrl.data ?? null}
+                  loading={sourceUrl.isLoading}
+                  onClose={() => setViewerOpen(false)}
+                />
+              ) : null
+            }
+            summary={
+              !d.summaryHtml && d.summaryText.trim() ? (
+                <div className="card-soft p-6 text-muted-foreground">Preparando o editor…</div>
+              ) : d.summaryHtml || writingOwn ? (
+                <div className="card-soft p-4 md:p-6">
+                  <div className="mb-3 flex justify-end">
+                    <RegenerateSummaryButton onConfirm={() => summaryGen.mutate()} generating={summaryGen.isPending} />
+                  </div>
+                  <ResumoEditor
+                    key={`resumo-${summaryVersion}`}
+                    topicId={id}
+                    html={d.summaryHtml || "<p></p>"}
+                    maskMode={maskMode}
+                    startEditing={writingOwn && !d.summaryHtml}
+                  />
+                </div>
+              ) : (
+                <ResumoEmptyState
+                  onWriteOwn={() => setWritingOwn(true)}
+                  onGenerate={() => summaryGen.mutate()}
+                  generating={summaryGen.isPending}
+                />
+              )
+            }
+          />
         </TabsContent>
         <TabsContent value="mapa" className="mt-4 animate-fade-up">
           {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}

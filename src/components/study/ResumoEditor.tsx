@@ -17,8 +17,18 @@ import { cn } from "@/lib/utils";
  *  selecionar (sem precisar entrar no editor); "Editar" liga a edição completa,
  *  onde o marcador passa a ser um botão (junto com o resto da formatação). Salva
  *  sozinho enquanto editando. */
-export function ResumoEditor({ topicId, html, maskMode }: { topicId: string; html: string; maskMode: boolean }) {
-  const [editing, setEditing] = useState(false);
+export function ResumoEditor({
+  topicId,
+  html,
+  maskMode,
+  startEditing = false,
+}: {
+  topicId: string;
+  html: string;
+  maskMode: boolean;
+  startEditing?: boolean;
+}) {
+  const [editing, setEditing] = useState(startEditing);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -32,7 +42,7 @@ export function ResumoEditor({ topicId, html, maskMode }: { topicId: string; htm
       TableCell,
     ],
     content: html,
-    editable: false,
+    editable: startEditing,
     shouldRerenderOnTransaction: true,
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");

@@ -1,5 +1,4 @@
 import JSZip from "jszip";
-import { base64ToUint8Array } from "./base64.server";
 
 function unescapeXml(s: string): string {
   return s
@@ -12,8 +11,8 @@ function unescapeXml(s: string): string {
 
 /** Extrai só o texto das caixas de cada slide de um .pptx (é um zip com um XML por slide).
  *  Não lê imagens, diagramas nem formas sem texto — é a limitação real do formato aqui. */
-export async function extractPptxText(base64: string): Promise<string> {
-  const zip = await JSZip.loadAsync(base64ToUint8Array(base64));
+export async function extractPptxText(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
 
   const slideFiles = Object.keys(zip.files)
     .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
