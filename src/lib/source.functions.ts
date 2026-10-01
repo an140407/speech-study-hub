@@ -17,6 +17,8 @@ import {
   createUploadUrl,
   downloadObject,
   findSourceFile,
+  isPdfBytes,
+  isZipBytes,
   generateSummaryHtml,
   releaseSourceFile,
   removeObjects,
@@ -81,8 +83,12 @@ export const ingestSource = createServerFn({ method: "POST" })
         return { file_uri: fileUri, text: existing.text ?? null, convert_path: null, warning: null };
       }
 
+      if (!data.upload_path.endsWith(`.${data.kind}`)) throw new Error("Tipo de arquivo não confere.");
       const bytes = await downloadObject(data.upload_path);
       if (bytes.length > MAX_SOURCE_BYTES) throw new Error("Arquivo maior que 50MB.");
+      if (kind === "pdf" ? !isPdfBytes(bytes) : !isZipBytes(bytes)) {
+        throw new Error(`O arquivo enviado não é um ${kind.toUpperCase()} válido.`);
+      }
       if ((await sha256Hex(bytes)) !== data.hash) {
         throw new Error("O arquivo enviado não confere com o original. Tente enviar de novo.");
       }
@@ -198,11 +204,13 @@ export const startTopicConversion = createServerFn({ method: "POST" })
       }
       const bytes = await downloadObject(data.upload_path);
       if ((await sha256Hex(bytes)) !== data.hash) throw new Error("O arquivo enviado não confere com o original.");
+      if (!isZipBytes(bytes)) throw new Error("O arquivo enviado não é um PPTX válido.");
       if (canConvertInline(bytes.length)) {
         await finishConversion(topic.id, data.hash, await convertWithCloudmersive(bytes), topic.source_text, data.upload_path);
         return { status: "done" as const, job_id: null };
       }
-      return { status: "pending" as const, job_id: await startCloudConvertJob(data.upload_path) };
+      const tag = `${topic.id}:${data.hash}`;
+      return { status: "pending" as const, job_id: await startCloudConvertJob(data.upload_path, tag) };
     } catch (e) {
       await removeObjects([data.upload_path]).catch(() => undefined);
       throw e;
@@ -216,7 +224,7 @@ export const pollTopicConversion = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const topic = await assertOwnTopic(context.supabase, data.topic_id);
     try {
-      const res = await checkCloudConvertJob(data.job_id);
+      const res = await checkCloudConvertJob(data.job_id, `${topic.id}:${data.hash}`);
       if (res.status === "pending") return { status: "pending" as const };
       await finishConversion(topic.id, data.hash, res.pdf, topic.source_text, data.upload_path);
       return { status: "done" as const };

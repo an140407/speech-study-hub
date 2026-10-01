@@ -20,7 +20,8 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
-    let loaded: PdfDoc | null = null;
+    // No pdf.js 6, quem fecha o documento é a tarefa de carregamento (o documento não tem mais destroy()).
+    let task: { destroy: () => Promise<void> } | null = null;
     setDoc(null);
     setError(false);
     (async () => {
@@ -28,8 +29,10 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
         const pdfjs = await import("pdfjs-dist");
         const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
         pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-        loaded = (await pdfjs.getDocument({ url }).promise) as unknown as PdfDoc;
-        if (cancelled) loaded.destroy();
+        const loadingTask = pdfjs.getDocument({ url });
+        task = loadingTask;
+        const loaded = (await loadingTask.promise) as unknown as PdfDoc;
+        if (cancelled) void loadingTask.destroy();
         else setDoc(loaded);
       } catch {
         if (!cancelled) setError(true);
@@ -37,7 +40,7 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
     })();
     return () => {
       cancelled = true;
-      loaded?.destroy();
+      void task?.destroy().catch(() => undefined);
     };
   }, [url]);
 

@@ -59,6 +59,8 @@ export async function createUploadUrl(kind: SourceKind) {
 
 /** Guarda o PDF final (original ou convertido) com o nome = impressão digital do arquivo enviado. */
 export async function storeSourcePdf(hash: string, kind: SourceKind, pdf: Uint8Array, text: string) {
+  // Defesa extra: nada que não seja PDF de verdade entra no bucket.
+  if (!isPdfBytes(pdf)) throw new Error("O arquivo não é um PDF válido.");
   const storage_path = `pdf/${hash}.pdf`;
   const { error } = await supabaseAdmin.storage
     .from(BUCKET)
@@ -122,10 +124,17 @@ export async function setTopicSource(
 
 const CLOUDMERSIVE_MAX_BYTES = 3.5 * 1024 * 1024;
 
+export function isPdfBytes(bytes: Uint8Array) {
+  return bytes.length >= 5 && String.fromCharCode(...bytes.slice(0, 5)) === "%PDF-";
+}
+
+/** PPTX é um zip: começa com "PK\x03\x04". A estrutura interna é conferida na extração dos slides. */
+export function isZipBytes(bytes: Uint8Array) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
+}
+
 function assertPdf(bytes: Uint8Array) {
-  if (bytes.length < 5 || String.fromCharCode(...bytes.slice(0, 4)) !== "%PDF") {
-    throw new Error("A conversão não devolveu um PDF válido.");
-  }
+  if (!isPdfBytes(bytes)) throw new Error("A conversão não devolveu um PDF válido.");
 }
 
 export function canConvertInline(size: number) {
@@ -160,7 +169,7 @@ function cloudConvertKey() {
 }
 
 /** Cria o job na CloudConvert (volta na hora). A CloudConvert busca o PPTX por um link temporário do Storage. */
-export async function startCloudConvertJob(storagePath: string): Promise<string> {
+export async function startCloudConvertJob(storagePath: string, ownerTag: string): Promise<string> {
   const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(storagePath, 3600);
   if (error || !data) throw new Error("Não foi possível preparar o arquivo pra conversão.");
   const res = await fetch("https://api.cloudconvert.com/v2/jobs", {
@@ -172,6 +181,7 @@ export async function startCloudConvertJob(storagePath: string): Promise<string>
         "convert-pdf": { operation: "convert", input: "import-pptx", input_format: "pptx", output_format: "pdf" },
         "export-pdf": { operation: "export/url", input: "convert-pdf" },
       },
+      tag: ownerTag,
     }),
   });
   if (!res.ok) {
@@ -202,7 +212,10 @@ function cloudConvertMessage(body: string): string {
 type CCTask = { operation: string; status: string; message?: string; result?: { files?: { url: string }[] } };
 
 /** Consulta o job: "pending" enquanto processa; o PDF quando termina; erro com o motivo quando falha. */
-export async function checkCloudConvertJob(jobId: string): Promise<{ status: "pending" } | { status: "done"; pdf: Uint8Array }> {
+export async function checkCloudConvertJob(
+  jobId: string,
+  ownerTag: string,
+): Promise<{ status: "pending" } | { status: "done"; pdf: Uint8Array }> {
   const res = await fetch(`https://api.cloudconvert.com/v2/jobs/${encodeURIComponent(jobId)}`, {
     headers: { Authorization: `Bearer ${cloudConvertKey()}`, ...CC_HEADERS },
   });
@@ -211,7 +224,9 @@ export async function checkCloudConvertJob(jobId: string): Promise<{ status: "pe
     console.error("CloudConvert poll error", res.status, body.slice(0, 500));
     throw new Error(`Falha ao consultar a conversão (erro ${res.status}${cloudConvertMessage(body)})`);
   }
-  const job = (await res.json()) as { data?: { status?: string; tasks?: CCTask[] } };
+  const job = (await res.json()) as { data?: { status?: string; tag?: string; tasks?: CCTask[] } };
+  // Só quem iniciou a conversão (mesmo tópico e mesmo arquivo) pode consultar o resultado.
+  if (job.data?.tag !== ownerTag) throw new Error("Conversão não encontrada.");
   const status = job.data?.status;
   if (status === "error") {
     const failed = job.data?.tasks?.find((t) => t.status === "error");
