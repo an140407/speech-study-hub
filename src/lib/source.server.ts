@@ -150,6 +150,8 @@ export async function convertWithCloudmersive(pptx: Uint8Array): Promise<Uint8Ar
   return out;
 }
 
+const CC_HEADERS = { "User-Agent": "FonoLab/1.0 (+https://lovable.dev)", Accept: "application/json" };
+
 function cloudConvertKey() {
   const key = process.env["CLOUDCONVERT_API_KEY"];
   if (!key) throw new Error("PPTX acima de 3,5MB precisa da CloudConvert, e a CLOUDCONVERT_API_KEY não está configurada.");
@@ -162,7 +164,7 @@ export async function startCloudConvertJob(storagePath: string): Promise<string>
   if (error || !data) throw new Error("Não foi possível preparar o arquivo pra conversão.");
   const res = await fetch("https://api.cloudconvert.com/v2/jobs", {
     method: "POST",
-    headers: { Authorization: `Bearer ${cloudConvertKey()}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${cloudConvertKey()}`, "Content-Type": "application/json", ...CC_HEADERS },
     body: JSON.stringify({
       tasks: {
         "import-pptx": { operation: "import/url", url: data.signedUrl, filename: "aula.pptx" },
@@ -186,10 +188,14 @@ function cloudConvertMessage(body: string): string {
   try {
     const parsed = JSON.parse(body) as { message?: string; code?: string };
     const msg = [parsed.code, parsed.message].filter(Boolean).join(": ");
-    return msg ? ` — ${msg.slice(0, 200)}` : "";
+    if (msg) return ` — ${msg.slice(0, 200)}`;
   } catch {
-    return "";
+    // não é JSON: provavelmente uma página HTML de bloqueio (firewall)
   }
+  const title = body.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+  if (title) return ` — página de bloqueio: "${title.slice(0, 120)}"`;
+  const text = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return text ? ` — ${text.slice(0, 120)}` : "";
 }
 
 type CCTask = { operation: string; status: string; message?: string; result?: { files?: { url: string }[] } };
@@ -197,7 +203,7 @@ type CCTask = { operation: string; status: string; message?: string; result?: { 
 /** Consulta o job: "pending" enquanto processa; o PDF quando termina; erro com o motivo quando falha. */
 export async function checkCloudConvertJob(jobId: string): Promise<{ status: "pending" } | { status: "done"; pdf: Uint8Array }> {
   const res = await fetch(`https://api.cloudconvert.com/v2/jobs/${encodeURIComponent(jobId)}`, {
-    headers: { Authorization: `Bearer ${cloudConvertKey()}` },
+    headers: { Authorization: `Bearer ${cloudConvertKey()}`, ...CC_HEADERS },
   });
   if (!res.ok) {
     const body = await res.text();
