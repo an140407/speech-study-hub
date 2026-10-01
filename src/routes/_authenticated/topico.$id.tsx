@@ -14,6 +14,7 @@ import { RegenerateSummaryButton } from "@/components/study/RegenerateSummaryBut
 import { ResumoSplitLayout } from "@/components/study/ResumoSplitLayout";
 import { SourcePdfViewer } from "@/components/study/SourcePdfViewer";
 import { deleteTopic as deleteTopicFn, generateSummary, getSourceFileUrl } from "@/lib/source.functions";
+import { aiErrorMessage, withAiRetry } from "@/lib/ai-busy";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
@@ -165,14 +166,19 @@ function TopicPage() {
   const sourcePending = useQuery({ queryKey: ["source-pending", id], queryFn: () => false, enabled: false });
 
   const summaryGen = useMutation({
-    mutationFn: () => genSummary({ data: { topic_id: id } }),
+    mutationFn: () =>
+      withAiRetry(
+        () => genSummary({ data: { topic_id: id } }),
+        (wait) =>
+          toast.info(`O servidor da IA está congestionado — tentando de novo em ${wait}s. Pode demorar alguns segundos a mais.`),
+      ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["topic", id] });
       setWritingOwn(false);
       setSummaryVersion((v) => v + 1);
       toast.success("Resumo gerado!");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Falha ao gerar o resumo."),
+    onError: (e) => toast.error(aiErrorMessage(e, "Falha ao gerar o resumo.")),
   });
 
   // Link temporário (10 min) do material original, pedido só quando a prévia é aberta.

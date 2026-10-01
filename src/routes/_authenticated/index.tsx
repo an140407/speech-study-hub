@@ -16,6 +16,7 @@ import {
   transcribeTopicSource,
 } from "@/lib/source.functions";
 import { Checkbox } from "@/components/ui/checkbox";
+import { aiErrorMessage, withAiRetry } from "@/lib/ai-busy";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -189,22 +190,37 @@ function Index() {
       uploadPath = prep.path;
     }
     setStage("Preparando o arquivo…");
-    const ing = await ingest({ data: { hash, kind, keep: keepFile, upload_path: uploadPath } });
+    const ing = await withAiRetry(
+      () => ingest({ data: { hash, kind, keep: keepFile, upload_path: uploadPath } }),
+      (wait) => onAiBusy(wait, "Preparando o arquivo…"),
+    );
     if (ing.warning) toast.warning(ing.warning);
 
     setStage("Gerando o material…");
-    const res = await createTopic({
-      data: { hash, kind, name: file.name, keep: keepFile, file_uri: ing.file_uri, text: ing.text },
-    });
+    const res = await withAiRetry(
+      () =>
+        createTopic({
+          data: { hash, kind, name: file.name, keep: keepFile, file_uri: ing.file_uri, text: ing.text },
+        }),
+      (wait) => onAiBusy(wait, "Gerando o material…"),
+    );
 
     // Conversão do PPTX e transcrição da aula em segundo plano (não travam a abertura do tópico).
     if (ing.convert_path) void convertInBackground(res.topic_id, hash, ing.convert_path);
     if (res.needs_transcription && ing.file_uri) {
-      transcribe({ data: { topic_id: res.topic_id, file_uri: ing.file_uri } }).catch((e) =>
+      const fileUri = ing.file_uri;
+      withAiRetry(() => transcribe({ data: { topic_id: res.topic_id, file_uri: fileUri } })).catch((e) =>
         console.error("Transcrição em segundo plano falhou", e),
       );
     }
     return res;
+  }
+
+  /** IA congestionada: avisa e mostra a espera; o withAiRetry tenta de novo sozinho. */
+  function onAiBusy(waitSeconds: number, nextStage: string) {
+    toast.info(`O servidor da IA está congestionado — tentando de novo em ${waitSeconds}s. Pode demorar alguns segundos a mais.`);
+    setStage(`Servidor da IA congestionado, tentando de novo em ${waitSeconds}s…`);
+    setTimeout(() => setStage(nextStage), waitSeconds * 1000);
   }
 
   async function handleGenerate(e?: React.FormEvent) {
@@ -217,12 +233,15 @@ function Index() {
     try {
       const res = attachedFile
         ? await generateFromFile(attachedFile.file, attachedFile.kind)
-        : await generate({ data: { topic: topic.trim() } });
+        : await withAiRetry(
+            () => generate({ data: { topic: topic.trim() } }),
+            (wait) => onAiBusy(wait, "Gerando o material…"),
+          );
       await queryClient.invalidateQueries({ queryKey: ["topics"] });
       toast.success("Material gerado!");
       navigate({ to: "/topico/$id", params: { id: res.topic_id } });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao gerar o material.");
+      toast.error(aiErrorMessage(err, "Falha ao gerar o material."));
     } finally {
       setLoading(false);
       setStage(null);
@@ -294,6 +313,12 @@ function Index() {
             <Checkbox checked={keepFile} onCheckedChange={(v) => setKeepFile(v === true)} disabled={loading} />
             Guardar arquivo original{attachedFile.kind === "pptx" ? " (convertido em PDF)" : ""} pra ver junto do resumo
           </label>
+        )}
+        {attachedFile?.kind === "pptx" && keepFile && (
+          <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground">
+            Dica: se puder, exporte a aula como PDF no PowerPoint (Arquivo → Exportar → PDF) e envie o PDF. A prévia
+            fica mais fiel e não precisa de conversão.
+          </p>
         )}
         {loading && (
           <p className="mt-3 text-sm text-muted-foreground">

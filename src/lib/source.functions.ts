@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { generateStudyMaterialFromPdfUri, generateStudyMaterialFromText } from "./gemini.server";
+import { isAiBusy } from "./ai-busy";
 import { extractPptxText } from "./pptx.server";
 import {
   MAX_SOURCE_BYTES,
@@ -102,6 +103,10 @@ export const ingestSource = createServerFn({ method: "POST" })
       const convertPath = data.keep && !existing ? data.upload_path : null;
       keepUpload = !!convertPath;
       return { file_uri: null, text, convert_path: convertPath, warning: null };
+    } catch (e) {
+      // IA congestionada: o navegador vai tentar de novo, então o arquivo enviado precisa continuar lá.
+      if (isAiBusy(e)) keepUpload = true;
+      throw e;
     } finally {
       if (data.upload_path && !keepUpload) await removeObjects([data.upload_path]).catch(() => undefined);
     }

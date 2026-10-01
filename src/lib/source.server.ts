@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import type { Database } from "@/integrations/supabase/types";
 import type { GeneratedMaterial } from "./study-types";
 import { uploadPdfToGeminiFiles } from "./gemini.server";
+import { aiBusyError, isBusyStatus } from "./ai-busy";
 
 export const BUCKET = "source-files";
 export const MAX_SOURCE_BYTES = 50 * 1024 * 1024;
@@ -252,6 +253,7 @@ async function geminiText(model: string, system: string, parts: Part[]): Promise
   if (!res.ok) {
     const body = await res.text();
     console.error(`Gemini ${model} error`, res.status, body.slice(0, 500));
+    if (isBusyStatus(res.status)) throw aiBusyError(res.status);
     const err = new Error(`Erro na API do Gemini (${res.status}).`) as Error & { status?: number };
     err.status = res.status;
     throw err;

@@ -1,4 +1,5 @@
 import type { GeneratedMaterial } from "./study-types";
+import { aiBusyError, isAiBusy, isBusyStatus } from "./ai-busy";
 
 const SYSTEM_PROMPT = `Você é um professor universitário de Fonoaudiologia no Brasil. Gere material de estudo em português do Brasil, com rigor acadêmico e linguagem clara para estudantes de graduação.
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
@@ -122,7 +123,7 @@ async function callModel(topic: string): Promise<string> {
     if (!res.ok) {
       const body = await res.text();
       console.error("Gemini error", res.status, body);
-      throw new Error(`Erro na API do Gemini (${res.status}).`);
+      throw isBusyStatus(res.status) ? aiBusyError(res.status) : new Error(`Erro na API do Gemini (${res.status}).`);
     }
     const json = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
@@ -154,7 +155,7 @@ async function callModel(topic: string): Promise<string> {
   if (!res.ok) {
     const body = await res.text();
     console.error("Lovable AI error", res.status, body);
-    if (res.status === 429) throw new Error("Muitas solicitações. Aguarde um instante e tente de novo.");
+    if (isBusyStatus(res.status)) throw aiBusyError(res.status);
     if (res.status === 402) throw new Error("Créditos de IA esgotados. Adicione créditos no workspace.");
     throw new Error(`Erro na IA (${res.status}).`);
   }
@@ -267,7 +268,9 @@ export async function uploadPdfToGeminiFiles(bytes: Uint8Array, apiKey: string):
   });
   if (!startRes.ok) {
     console.error("Gemini upload start error", startRes.status, await startRes.text());
-    throw new Error(`Falha ao iniciar o envio do PDF pro Gemini (${startRes.status}).`);
+    throw isBusyStatus(startRes.status)
+      ? aiBusyError(startRes.status)
+      : new Error(`Falha ao iniciar o envio do PDF pro Gemini (${startRes.status}).`);
   }
   const uploadUrl = startRes.headers.get("x-goog-upload-url");
   if (!uploadUrl) throw new Error("O Gemini não devolveu a URL de upload.");
@@ -283,7 +286,9 @@ export async function uploadPdfToGeminiFiles(bytes: Uint8Array, apiKey: string):
   });
   if (!uploadRes.ok) {
     console.error("Gemini upload finalize error", uploadRes.status, await uploadRes.text());
-    throw new Error(`Falha ao enviar o PDF pro Gemini (${uploadRes.status}).`);
+    throw isBusyStatus(uploadRes.status)
+      ? aiBusyError(uploadRes.status)
+      : new Error(`Falha ao enviar o PDF pro Gemini (${uploadRes.status}).`);
   }
   const info = (await uploadRes.json()) as { file?: { uri?: string } };
   if (!info.file?.uri) throw new Error("O Gemini não devolveu o arquivo enviado.");
@@ -313,7 +318,7 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
     if (!res.ok) {
       const body = await res.text();
       console.error(`Gemini ${sourceLabel} error`, res.status, body);
-      lastError = new Error(`Erro na API do Gemini (${res.status}).`);
+      lastError = isBusyStatus(res.status) ? aiBusyError(res.status) : new Error(`Erro na API do Gemini (${res.status}).`);
       continue;
     }
     const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
@@ -333,6 +338,7 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
     }
   }
   console.error(lastError);
+  if (isAiBusy(lastError)) throw lastError;
   throw new Error(`A IA não conseguiu processar esse ${sourceLabel}. Tente outro arquivo ou um tema digitado.`);
 }
 
