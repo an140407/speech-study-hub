@@ -250,6 +250,24 @@ export type Database = {
           },
         ]
       }
+      source_claims: {
+        Row: {
+          created_at: string
+          hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          hash: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       source_files: {
         Row: {
           created_at: string

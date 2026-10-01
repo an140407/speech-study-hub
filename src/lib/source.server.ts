@@ -40,21 +40,49 @@ export async function removeObjects(paths: string[]) {
   if (paths.length) await supabaseAdmin.storage.from(BUCKET).remove(paths);
 }
 
+/** Arquivos temporários ficam numa pasta por usuário: ninguém lê, usa ou apaga o envio de outra pessoa. */
+export function userIncomingPrefix(userId: string) {
+  return `incoming/${userId}/`;
+}
+
+export function assertOwnUpload(userId: string, path: string) {
+  if (!path.startsWith(userIncomingPrefix(userId))) throw new Error("Arquivo enviado inválido.");
+}
+
 /** Apaga envios temporários esquecidos (a pessoa desistiu no meio) com mais de 1 hora. */
-export async function cleanupStaleIncoming() {
-  const { data } = await supabaseAdmin.storage.from(BUCKET).list("incoming", { limit: 100 });
+export async function cleanupStaleIncoming(userId: string) {
+  const folder = userIncomingPrefix(userId).slice(0, -1);
+  const { data } = await supabaseAdmin.storage.from(BUCKET).list(folder, { limit: 100 });
   const cutoff = Date.now() - 60 * 60 * 1000;
   const stale = (data ?? [])
     .filter((o) => o.created_at && new Date(o.created_at).getTime() < cutoff)
-    .map((o) => `incoming/${o.name}`);
+    .map((o) => `${folder}/${o.name}`);
   await removeObjects(stale);
 }
 
-export async function createUploadUrl(kind: SourceKind) {
-  const path = `incoming/${crypto.randomUUID()}.${kind}`;
+export async function createUploadUrl(kind: SourceKind, userId: string) {
+  const path = `${userIncomingPrefix(userId)}${crypto.randomUUID()}.${kind}`;
   const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUploadUrl(path);
   if (error || !data) throw new Error("Não foi possível preparar o envio do arquivo.");
   return { path, token: data.token };
+}
+
+// ---------------------------------------------------------------- Prova de posse
+// "Usuário X provou que tem o arquivo H": só é registrado depois que o servidor recebe os bytes e
+// confere a impressão digital. Toda ação sobre um arquivo guardado exige esse registro.
+
+export async function addClaim(userId: string, hash: string) {
+  await supabaseAdmin.from("source_claims").upsert({ user_id: userId, hash }, { ignoreDuplicates: true });
+}
+
+export async function hasClaim(userId: string, hash: string) {
+  const { data } = await supabaseAdmin
+    .from("source_claims")
+    .select("hash")
+    .eq("user_id", userId)
+    .eq("hash", hash)
+    .maybeSingle();
+  return !!data;
 }
 
 /** Guarda o PDF final (original ou convertido) com o nome = impressão digital do arquivo enviado. */

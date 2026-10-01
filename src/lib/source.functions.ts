@@ -8,7 +8,10 @@ import { isAiBusy } from "./ai-busy";
 import { extractPptxText } from "./pptx.server";
 import {
   MAX_SOURCE_BYTES,
+  addClaim,
+  assertOwnUpload,
   cleanupStaleIncoming,
+  hasClaim,
   canConvertInline,
   checkCloudConvertJob,
   convertWithCloudmersive,
@@ -38,20 +41,21 @@ import {
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/, "Impressão digital inválida.");
 const kindSchema = z.enum(["pdf", "pptx"]);
 
-/** Passo 1 do envio: se o arquivo idêntico já está guardado, não precisa enviar de novo. */
+/** Passo 1 do envio: link temporário pra enviar o arquivo direto pro Storage, na pasta do próprio usuário.
+ *  O envio acontece sempre (mesmo que o arquivo já esteja guardado por alguém): o servidor só reconhece
+ *  que a pessoa tem o arquivo depois de receber e conferir os bytes. */
 export const prepareSourceUpload = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
     z.object({ hash: hashSchema, kind: kindSchema, size: z.number().int().positive().max(MAX_SOURCE_BYTES) }).parse(input),
   )
-  .handler(async ({ data }) => {
-    await cleanupStaleIncoming().catch(() => undefined);
-    const existing = await findSourceFile(data.hash);
-    if (existing) return { mode: "existing" as const };
-    const { path, token } = await createUploadUrl(data.kind);
-    return { mode: "upload" as const, path, token };
+  .handler(async ({ data, context }) => {
+    await cleanupStaleIncoming(context.userId).catch(() => undefined);
+    const { path, token } = await createUploadUrl(data.kind, context.userId);
+    return { path, token };
   });
 
+const UPLOAD_PATH_RE = /^incoming\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(pdf|pptx)$/;
 const FILE_URI_RE = /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[A-Za-z0-9_-]+$/;
 
 /** Etapa 1 (curta): verifica o arquivo, envia pro Gemini, guarda/converte se pedido e apaga o temporário.
@@ -64,26 +68,17 @@ export const ingestSource = createServerFn({ method: "POST" })
         hash: hashSchema,
         kind: kindSchema,
         keep: z.boolean(),
-        upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\.(pdf|pptx)$/).nullable(),
+        upload_path: z.string().regex(UPLOAD_PATH_RE),
       })
       .parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    assertOwnUpload(context.userId, data.upload_path);
     const warnings: string[] = [];
     let keepUpload = false;
     try {
-      const existing = await findSourceFile(data.hash);
-      const kind: SourceKind = existing?.kind === "pdf" || existing?.kind === "pptx" ? existing.kind : data.kind;
-
-      // Cópia já guardada por alguém: reaproveita sem novo envio.
-      if (!data.upload_path) {
-        if (!existing) throw new Error("Arquivo não encontrado. Envie de novo.");
-        if (kind === "pptx" && existing.text) return { file_uri: null, text: existing.text, convert_path: null, warning: null };
-        const fileUri = await uploadToGemini(await downloadObject(existing.storage_path));
-        return { file_uri: fileUri, text: existing.text ?? null, convert_path: null, warning: null };
-      }
-
-      if (!data.upload_path.endsWith(`.${data.kind}`)) throw new Error("Tipo de arquivo não confere.");
+      const kind: SourceKind = data.kind;
+      if (!data.upload_path.endsWith(`.${kind}`)) throw new Error("Tipo de arquivo não confere.");
       const bytes = await downloadObject(data.upload_path);
       if (bytes.length > MAX_SOURCE_BYTES) throw new Error("Arquivo maior que 50MB.");
       if (kind === "pdf" ? !isPdfBytes(bytes) : !isZipBytes(bytes)) {
@@ -91,6 +86,15 @@ export const ingestSource = createServerFn({ method: "POST" })
       }
       if ((await sha256Hex(bytes)) !== data.hash) {
         throw new Error("O arquivo enviado não confere com o original. Tente enviar de novo.");
+      }
+
+      // Bytes recebidos e conferidos: agora sim fica provado que essa pessoa tem o arquivo.
+      await addClaim(context.userId, data.hash);
+      const existing = await findSourceFile(data.hash);
+
+      // Cópia idêntica já guardada (por qualquer pessoa): reaproveita o texto e não guarda/converte de novo.
+      if (existing && kind === "pptx" && existing.text) {
+        return { file_uri: null, text: existing.text, convert_path: null, warning: null };
       }
 
       if (kind === "pdf") {
@@ -142,7 +146,8 @@ export const createTopicFromSource = createServerFn({ method: "POST" })
     if (!material) throw new Error("Não foi possível ler o conteúdo do arquivo.");
 
     const topic_id = await saveGeneratedMaterial(context.supabase, material.topic_title, material);
-    const stored = data.keep ? await findSourceFile(data.hash) : null;
+    const owns = await hasClaim(context.userId, data.hash);
+    const stored = data.keep && owns ? await findSourceFile(data.hash) : null;
     await setTopicSource(topic_id, {
       source_kind: data.kind,
       source_name: data.name,
@@ -166,15 +171,21 @@ export const transcribeTopicSource = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!topic) throw new Error("Tópico não encontrado.");
     const text = await transcribePdf(data.file_uri);
-    if (text) await saveTopicSourceText(topic.id, text, topic.source_hash);
+    const shared = topic.source_hash && (await hasClaim(context.userId, topic.source_hash)) ? topic.source_hash : null;
+    if (text) await saveTopicSourceText(topic.id, text, shared);
     return { ok: true };
   });
 
 const convertInput = z.object({
   topic_id: z.string().uuid(),
   hash: hashSchema,
-  upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\.pptx$/),
+  upload_path: z.string().regex(/^incoming\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.pptx$/),
 });
+
+async function assertCanConvert(userId: string, hash: string, uploadPath: string) {
+  assertOwnUpload(userId, uploadPath);
+  if (!(await hasClaim(userId, hash))) throw new Error("Arquivo não encontrado.");
+}
 
 async function assertOwnTopic(supabase: SupabaseClient<Database>, topicId: string) {
   const { data } = await supabase.from("topics").select("id, source_text, source_hash").eq("id", topicId).maybeSingle();
@@ -195,6 +206,7 @@ export const startTopicConversion = createServerFn({ method: "POST" })
   .validator((input: unknown) => convertInput.parse(input))
   .handler(async ({ data, context }) => {
     const topic = await assertOwnTopic(context.supabase, data.topic_id);
+    await assertCanConvert(context.userId, data.hash, data.upload_path);
     try {
       const existing = await findSourceFile(data.hash);
       if (existing) {
@@ -223,6 +235,7 @@ export const pollTopicConversion = createServerFn({ method: "POST" })
   .validator((input: unknown) => convertInput.extend({ job_id: z.string().min(1).max(100) }).parse(input))
   .handler(async ({ data, context }) => {
     const topic = await assertOwnTopic(context.supabase, data.topic_id);
+    await assertCanConvert(context.userId, data.hash, data.upload_path);
     try {
       const res = await checkCloudConvertJob(data.job_id, `${topic.id}:${data.hash}`);
       if (res.status === "pending") return { status: "pending" as const };
@@ -244,7 +257,9 @@ export const getSourceFileUrl = createServerFn({ method: "POST" })
       .select("source_hash")
       .eq("id", data.topic_id)
       .maybeSingle();
-    if (!topic?.source_hash) throw new Error("Esse tópico não tem material original guardado.");
+    if (!topic?.source_hash || !(await hasClaim(context.userId, topic.source_hash))) {
+      throw new Error("Esse tópico não tem material original guardado.");
+    }
     const file = await findSourceFile(topic.source_hash);
     if (!file) throw new Error("O material original não está mais disponível.");
     return { url: await signedSourceUrl(file.storage_path) };
@@ -263,7 +278,8 @@ export const generateSummary = createServerFn({ method: "POST" })
     if (!topic) throw new Error("Tópico não encontrado.");
 
     let source: SummarySource = { type: "title" };
-    const file = topic.source_hash ? await findSourceFile(topic.source_hash) : null;
+    const file =
+      topic.source_hash && (await hasClaim(context.userId, topic.source_hash)) ? await findSourceFile(topic.source_hash) : null;
     if (file) {
       source = { type: "pdf", fileUri: await uploadToGemini(await downloadObject(file.storage_path)) };
     } else if (topic.source_text?.trim()) {

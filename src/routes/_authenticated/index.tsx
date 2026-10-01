@@ -178,17 +178,14 @@ function Index() {
     setStage("Lendo o arquivo…");
     const hash = await sha256Hex(file);
     const prep = await prepareUpload({ data: { hash, kind, size: file.size } });
-    let uploadPath: string | null = null;
-    if (prep.mode === "upload") {
-      setStage("Enviando o arquivo…");
-      const { error } = await supabase.storage
-        .from("source-files")
-        .uploadToSignedUrl(prep.path, prep.token, file, {
-          contentType: kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        });
-      if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
-      uploadPath = prep.path;
-    }
+    setStage("Enviando o arquivo…");
+    const { error } = await supabase.storage
+      .from("source-files")
+      .uploadToSignedUrl(prep.path, prep.token, file, {
+        contentType: kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+    if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
+    const uploadPath = prep.path;
     setStage("Preparando o arquivo…");
     const ing = await withAiRetry(
       () => ingest({ data: { hash, kind, keep: keepFile, upload_path: uploadPath } }),
