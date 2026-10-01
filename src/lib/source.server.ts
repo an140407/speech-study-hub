@@ -172,12 +172,24 @@ export async function startCloudConvertJob(storagePath: string): Promise<string>
     }),
   });
   if (!res.ok) {
-    console.error("CloudConvert create error", res.status, (await res.text()).slice(0, 300));
-    throw new Error(`CloudConvert recusou a conversão (erro ${res.status}).`);
+    const body = await res.text();
+    console.error("CloudConvert create error", res.status, body.slice(0, 500));
+    throw new Error(`CloudConvert recusou a conversão (erro ${res.status}${cloudConvertMessage(body)})`);
   }
   const job = (await res.json()) as { data?: { id?: string } };
   if (!job.data?.id) throw new Error("CloudConvert não devolveu o job.");
   return job.data.id;
+}
+
+/** Extrai a mensagem de erro que a própria CloudConvert devolve, pra mostrar o motivo real no aviso. */
+function cloudConvertMessage(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { message?: string; code?: string };
+    const msg = [parsed.code, parsed.message].filter(Boolean).join(": ");
+    return msg ? ` — ${msg.slice(0, 200)}` : "";
+  } catch {
+    return "";
+  }
 }
 
 type CCTask = { operation: string; status: string; message?: string; result?: { files?: { url: string }[] } };
@@ -187,7 +199,11 @@ export async function checkCloudConvertJob(jobId: string): Promise<{ status: "pe
   const res = await fetch(`https://api.cloudconvert.com/v2/jobs/${encodeURIComponent(jobId)}`, {
     headers: { Authorization: `Bearer ${cloudConvertKey()}` },
   });
-  if (!res.ok) throw new Error(`Falha ao consultar a conversão (erro ${res.status}).`);
+  if (!res.ok) {
+    const body = await res.text();
+    console.error("CloudConvert poll error", res.status, body.slice(0, 500));
+    throw new Error(`Falha ao consultar a conversão (erro ${res.status}${cloudConvertMessage(body)})`);
+  }
   const job = (await res.json()) as { data?: { status?: string; tasks?: CCTask[] } };
   const status = job.data?.status;
   if (status === "error") {
