@@ -49,6 +49,13 @@ export function assertOwnUpload(userId: string, path: string) {
   if (!path.startsWith(userIncomingPrefix(userId))) throw new Error("Arquivo enviado inválido.");
 }
 
+/** Apaga um envio temporário só depois de confirmar que ele está na pasta do próprio usuário.
+ *  Todo caminho que vem do navegador passa por aqui, nunca direto por removeObjects. */
+export async function removeOwnUpload(userId: string, path: string) {
+  assertOwnUpload(userId, path);
+  await removeObjects([path]);
+}
+
 /** Apaga envios temporários esquecidos (a pessoa desistiu no meio) com mais de 1 hora. */
 export async function cleanupStaleIncoming(userId: string) {
   const folder = userIncomingPrefix(userId).slice(0, -1);

@@ -24,7 +24,7 @@ import {
   isZipBytes,
   generateSummaryHtml,
   releaseSourceFile,
-  removeObjects,
+  removeOwnUpload,
   saveGeneratedMaterial,
   saveSummaryHtml,
   saveTopicSourceText,
@@ -118,7 +118,7 @@ export const ingestSource = createServerFn({ method: "POST" })
       if (isAiBusy(e)) keepUpload = true;
       throw e;
     } finally {
-      if (data.upload_path && !keepUpload) await removeObjects([data.upload_path]).catch(() => undefined);
+      if (data.upload_path && !keepUpload) await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
     }
   });
 
@@ -193,10 +193,17 @@ async function assertOwnTopic(supabase: SupabaseClient<Database>, topicId: strin
   return data;
 }
 
-async function finishConversion(topicId: string, hash: string, pdf: Uint8Array, text: string | null, uploadPath: string) {
+async function finishConversion(
+  userId: string,
+  topicId: string,
+  hash: string,
+  pdf: Uint8Array,
+  text: string | null,
+  uploadPath: string,
+) {
   await storeSourcePdf(hash, "pptx", pdf, text ?? "");
   await linkTopicSource(topicId, hash);
-  await removeObjects([uploadPath]).catch(() => undefined);
+  await removeOwnUpload(userId, uploadPath).catch(() => undefined);
 }
 
 /** Etapa 4a (segundo plano): converte o PPTX guardado. Pequeno: resolve na hora. Grande: abre um job e
@@ -211,20 +218,20 @@ export const startTopicConversion = createServerFn({ method: "POST" })
       const existing = await findSourceFile(data.hash);
       if (existing) {
         await linkTopicSource(topic.id, data.hash);
-        await removeObjects([data.upload_path]).catch(() => undefined);
+        await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
         return { status: "done" as const, job_id: null };
       }
       const bytes = await downloadObject(data.upload_path);
       if ((await sha256Hex(bytes)) !== data.hash) throw new Error("O arquivo enviado não confere com o original.");
       if (!isZipBytes(bytes)) throw new Error("O arquivo enviado não é um PPTX válido.");
       if (canConvertInline(bytes.length)) {
-        await finishConversion(topic.id, data.hash, await convertWithCloudmersive(bytes), topic.source_text, data.upload_path);
+        await finishConversion(context.userId, topic.id, data.hash, await convertWithCloudmersive(bytes), topic.source_text, data.upload_path);
         return { status: "done" as const, job_id: null };
       }
       const tag = `${topic.id}:${data.hash}`;
       return { status: "pending" as const, job_id: await startCloudConvertJob(data.upload_path, tag) };
     } catch (e) {
-      await removeObjects([data.upload_path]).catch(() => undefined);
+      await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
       throw e;
     }
   });
@@ -239,10 +246,10 @@ export const pollTopicConversion = createServerFn({ method: "POST" })
     try {
       const res = await checkCloudConvertJob(data.job_id, `${topic.id}:${data.hash}`);
       if (res.status === "pending") return { status: "pending" as const };
-      await finishConversion(topic.id, data.hash, res.pdf, topic.source_text, data.upload_path);
+      await finishConversion(context.userId, topic.id, data.hash, res.pdf, topic.source_text, data.upload_path);
       return { status: "done" as const };
     } catch (e) {
-      await removeObjects([data.upload_path]).catch(() => undefined);
+      await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
       throw e;
     }
   });
