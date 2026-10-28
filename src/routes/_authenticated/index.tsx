@@ -1,8 +1,17 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { BookOpen, FileText, Loader2, Paperclip, Sparkles, Trash2, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import {
+  ArrowRight,
+  Ellipsis,
+  FileText,
+  Loader2,
+  Paperclip,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMaterial } from "@/lib/study.functions";
@@ -18,19 +27,45 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { aiErrorMessage, withAiRetry } from "@/lib/ai-busy";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  cleanTitle,
+  progressPct,
+  shortDate,
+  useTopicsList,
+  useTopicsProgress,
+} from "@/lib/topics-index";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
       { title: "FonoLab — Material de estudo de Fonoaudiologia com IA" },
-      { name: "description", content: "Digite um tema de Fonoaudiologia e receba resumo, mapa mental, flashcards, questões e caso clínico." },
+      {
+        name: "description",
+        content:
+          "Digite um tema de Fonoaudiologia ou envie a aula e receba resumo, esquema, flashcards, questões e caso clínico.",
+      },
       { property: "og:title", content: "FonoLab — Estude Fonoaudiologia com IA" },
-      { property: "og:description", content: "Resumos, flashcards, questões e casos clínicos gerados por IA." },
+      {
+        property: "og:description",
+        content: "Resumos, flashcards, questões e casos clínicos gerados por IA.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -38,11 +73,18 @@ export const Route = createFileRoute("/_authenticated/")({
   component: Index,
 });
 
-const EXAMPLES = ["Paralisia facial periférica", "Disfagia orofaríngea", "Gagueira do desenvolvimento", "Presbiacusia"];
+const EXAMPLES = [
+  "Paralisia facial periférica",
+  "Disfagia orofaríngea",
+  "Gagueira do desenvolvimento",
+  "Presbiacusia",
+];
 
 function Index() {
   const [topic, setTopic] = useState("");
-  const [attachedFile, setAttachedFile] = useState<{ file: File; kind: "pdf" | "pptx" } | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{ file: File; kind: "pdf" | "pptx" } | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [keepFile, setKeepFile] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
@@ -69,7 +111,9 @@ function Index() {
         while (!done) {
           if (Date.now() > deadline) throw new Error("a conversão demorou demais");
           await new Promise((r) => setTimeout(r, 5000));
-          done = (await pollConversion({ data: { ...input, job_id: started.job_id } })).status === "done";
+          done =
+            (await pollConversion({ data: { ...input, job_id: started.job_id } })).status ===
+            "done";
         }
       }
       toast.success("Material original pronto — já dá pra ver junto do resumo.");
@@ -86,45 +130,9 @@ function Index() {
 
   const [search, setSearch] = useState("");
 
-  const topics = useQuery({
-    queryKey: ["topics"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("topics")
-        .select("id, title, created_at")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  const progress = useQuery({
-    queryKey: ["topics-progress"],
-    queryFn: async () => {
-      const [fc, mc, exams] = await Promise.all([
-        supabase.from("flashcards").select("topic_id, seen_at"),
-        supabase.from("mcq_questions").select("id, topic_id, seen_at"),
-        supabase.from("exam_attempts").select("question_ids"),
-      ]);
-      const map: Record<string, { fcTotal: number; fcSeen: number; mcTotal: number; mcSeen: number; exams: number }> = {};
-      const get = (t: string) => (map[t] ??= { fcTotal: 0, fcSeen: 0, mcTotal: 0, mcSeen: 0, exams: 0 });
-      for (const f of fc.data ?? []) { const e = get(f.topic_id); e.fcTotal++; if (f.seen_at) e.fcSeen++; }
-      const topicOfQuestion: Record<string, string> = {};
-      for (const m of mc.data ?? []) {
-        topicOfQuestion[m.id] = m.topic_id;
-        const e = get(m.topic_id); e.mcTotal++; if (m.seen_at) e.mcSeen++;
-      }
-      for (const a of exams.data ?? []) {
-        const ids = (a.question_ids as unknown as string[]) ?? [];
-        const topicsOf = new Set(ids.map((qid) => topicOfQuestion[qid]));
-        if (ids.length > 0 && topicsOf.size === 1) {
-          const only = [...topicsOf][0];
-          if (only) get(only).exams++;
-        }
-      }
-      return map;
-    },
-  });
+  const topics = useTopicsList();
+  const progress = useTopicsProgress();
+  const [dragging, setDragging] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -146,10 +154,20 @@ function Index() {
     queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
   }
 
-  const filtered = (topics.data ?? []).filter((t) =>
-    t.title.toLowerCase().includes(search.trim().toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLocaleLowerCase("pt-BR");
+    return (topics.data ?? [])
+      .map((t) => ({ ...t, label: cleanTitle(t.title) }))
+      .filter((t) => !q || t.label.toLocaleLowerCase("pt-BR").includes(q));
+  }, [topics.data, search]);
 
+  const totals = progress.data?.totals;
+  const fcPct = totals?.fcTotal ? Math.round((totals.fcSeen * 100) / totals.fcTotal) : 0;
+  const today = new Date().toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 
   function handlePickFile(file: File | null) {
     if (!file) return;
@@ -158,7 +176,10 @@ function Index() {
     const isPptx =
       file.type === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
       name.endsWith(".pptx");
-    if (!isPdf && !isPptx) { toast.error("Envie um arquivo PDF ou PPTX."); return; }
+    if (!isPdf && !isPptx) {
+      toast.error("Envie um arquivo PDF ou PPTX.");
+      return;
+    }
     const maxBytes = 50 * 1024 * 1024;
     if (file.size > maxBytes) {
       toast.error("Arquivo muito grande — o limite é 50MB.");
@@ -182,7 +203,10 @@ function Index() {
     const { error } = await supabase.storage
       .from("source-files")
       .uploadToSignedUrl(prep.path, prep.token, file, {
-        contentType: kind === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        contentType:
+          kind === "pdf"
+            ? "application/pdf"
+            : "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       });
     if (error) throw new Error("Falha ao enviar o arquivo. Tente de novo.");
     const uploadPath = prep.path;
@@ -197,7 +221,14 @@ function Index() {
     const res = await withAiRetry(
       () =>
         createTopic({
-          data: { hash, kind, name: file.name, keep: keepFile, file_uri: ing.file_uri, text: ing.text },
+          data: {
+            hash,
+            kind,
+            name: file.name,
+            keep: keepFile,
+            file_uri: ing.file_uri,
+            text: ing.text,
+          },
         }),
       (wait) => onAiBusy(wait, "Gerando o material…"),
     );
@@ -206,8 +237,8 @@ function Index() {
     if (ing.convert_path) void convertInBackground(res.topic_id, hash, ing.convert_path);
     if (res.needs_transcription && ing.file_uri) {
       const fileUri = ing.file_uri;
-      withAiRetry(() => transcribe({ data: { topic_id: res.topic_id, file_uri: fileUri } })).catch((e) =>
-        console.error("Transcrição em segundo plano falhou", e),
+      withAiRetry(() => transcribe({ data: { topic_id: res.topic_id, file_uri: fileUri } })).catch(
+        (e) => console.error("Transcrição em segundo plano falhou", e),
       );
     }
     return res;
@@ -215,7 +246,9 @@ function Index() {
 
   /** IA congestionada: avisa e mostra a espera; o withAiRetry tenta de novo sozinho. */
   function onAiBusy(waitSeconds: number, nextStage: string) {
-    toast.info(`O servidor da IA está congestionado — tentando de novo em ${waitSeconds}s. Pode demorar alguns segundos a mais.`);
+    toast.info(
+      `O servidor da IA está congestionado — tentando de novo em ${waitSeconds}s. Pode demorar alguns segundos a mais.`,
+    );
     setStage(`Servidor da IA congestionado, tentando de novo em ${waitSeconds}s…`);
     setTimeout(() => setStage(nextStage), waitSeconds * 1000);
   }
@@ -224,7 +257,10 @@ function Index() {
     e?.preventDefault();
     if (!attachedFile) {
       const t = topic.trim();
-      if (t.length < 3) { toast.error("Digite um tema com pelo menos 3 letras, ou anexe um PDF/PPTX."); return; }
+      if (t.length < 3) {
+        toast.error("Digite um tema com pelo menos 3 letras, ou anexe um PDF/PPTX.");
+        return;
+      }
     }
     setLoading(true);
     try {
@@ -246,172 +282,342 @@ function Index() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-4 pb-20 pt-10 md:pt-16">
-      <section className="animate-fade-up text-center">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-          <Sparkles className="size-3.5" /> Gerado por IA
-        </span>
-        <h1 className="mt-4 text-4xl font-semibold leading-tight md:text-5xl">
-          Estude Fonoaudiologia <span className="text-primary">com método</span>
-        </h1>
-        <p className="mx-auto mt-3 max-w-xl text-muted-foreground">
-          Digite um tema e receba resumo, mapa mental, flashcards, questões comentadas e um caso clínico.
+    <main
+      className="mx-auto w-full max-w-[880px] px-5 pb-24 pt-8 sm:px-8 lg:pt-14"
+      onDragOver={(e) => {
+        if (loading || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files?.length) return;
+        e.preventDefault();
+        setDragging(false);
+        if (!loading) handlePickFile(e.dataTransfer.files[0] ?? null);
+      }}
+    >
+      <section aria-labelledby="titulo-home" className="animate-fade-up">
+        <p className="text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground first-letter:uppercase">
+          {today}
         </p>
+        <h1
+          id="titulo-home"
+          className="mt-3 text-[2.6rem] leading-[1.02] tracking-[-0.02em] sm:text-6xl"
+        >
+          O que vamos <i className="grifo italic">estudar</i> hoje?
+        </h1>
 
-        <form onSubmit={handleGenerate} className="mx-auto mt-8 flex max-w-xl flex-col gap-2 sm:flex-row">
-          {attachedFile ? (
-            <div className="flex h-12 flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 shadow-soft">
-              <FileText className="size-4 shrink-0 text-primary" />
-              <span className="truncate text-sm">{attachedFile.file.name}</span>
-              <button
-                type="button"
-                onClick={() => setAttachedFile(null)}
-                className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                title="Remover arquivo"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-          ) : (
-            <div className="relative flex-1">
-              <Input
-                value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-                placeholder="Digite um tema de Fonoaudiologia"
-                className="h-12 rounded-xl bg-card pr-10 text-base shadow-soft"
-                disabled={loading}
-                maxLength={120}
-              />
+        <form
+          onSubmit={handleGenerate}
+          className={cn(
+            "mt-8 rounded-lg transition-[outline-color] outline-2 outline-offset-8 outline-transparent",
+            dragging && "outline-dashed outline-foreground/40",
+          )}
+        >
+          <div className="flex items-center gap-3 border-b-[1.5px] border-foreground transition-colors focus-within:border-ring">
+            {attachedFile ? (
+              <div className="flex h-14 min-w-0 flex-1 items-center gap-2.5">
+                <FileText className="size-5 shrink-0" aria-hidden />
+                <span className="truncate text-lg sm:text-xl">{attachedFile.file.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground tnum">
+                  {attachedFile.kind.toUpperCase()} ·{" "}
+                  {(attachedFile.file.size / 1024 / 1024).toFixed(1).replace(".", ",")} MB
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAttachedFile(null)}
+                  disabled={loading}
+                  aria-label="Remover arquivo"
+                  title="Remover arquivo"
+                  className="ml-1 flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-4" aria-hidden />
+                </button>
+              </div>
+            ) : (
+              <>
+                <label htmlFor="novo-topico" className="sr-only">
+                  Tema de Fonoaudiologia
+                </label>
+                <input
+                  id="novo-topico"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  placeholder="Digite um tema ou o título da aula…"
+                  autoComplete="off"
+                  disabled={loading}
+                  maxLength={120}
+                  className="h-14 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-[#77716a] disabled:opacity-60 sm:text-2xl"
+                />
+              </>
+            )}
+            <Button type="submit" className="h-11 shrink-0 rounded-md px-4" disabled={loading}>
+              {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+              <span className="hidden sm:inline">{loading ? "Gerando…" : "Gerar material"}</span>
+              <span className="sm:hidden">{loading ? "Gerando" : "Gerar"}</span>
+              {!loading && <ArrowRight className="size-4" aria-hidden />}
+            </Button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+            {!attachedFile && (
               <label
-                title="Ou envie um PDF/PPTX de aula"
-                className="absolute right-1 top-1 flex size-10 cursor-pointer items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "inline-flex h-9 cursor-pointer items-center gap-2 rounded-md font-medium text-foreground transition-colors hover:text-foreground/75",
+                  "focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ring",
+                  loading && "pointer-events-none opacity-60",
+                )}
               >
-                <Paperclip className="size-4" />
+                <Paperclip className="size-4" aria-hidden />
+                Anexar PDF ou PPTX
                 <input
                   type="file"
                   accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                  className="hidden"
+                  className="sr-only"
                   disabled={loading}
-                  onChange={(e) => handlePickFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    handlePickFile(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
                 />
               </label>
-            </div>
-          )}
-          <Button type="submit" size="lg" className="h-12 rounded-xl px-6 shadow-soft" disabled={loading}>
-            {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {loading ? "Gerando…" : attachedFile ? `Gerar a partir do ${attachedFile.kind.toUpperCase()}` : "Gerar material de estudo"}
-          </Button>
-        </form>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {attachedFile ? "A IA identifica o tema sozinha ao ler o arquivo." : "Ou anexe um PDF ou PPTX de aula pelo clipe — a IA descobre o tema sozinha."}
-        </p>
-        {attachedFile && (
-          <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-            <Checkbox checked={keepFile} onCheckedChange={(v) => setKeepFile(v === true)} disabled={loading} />
-            Guardar arquivo original{attachedFile.kind === "pptx" ? " (convertido em PDF)" : ""} pra ver junto do resumo
-          </label>
-        )}
-        {attachedFile?.kind === "pptx" && keepFile && (
-          <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground">
-            Dica: se puder, exporte a aula como PDF no PowerPoint (Arquivo → Exportar → PDF) e envie o PDF. A prévia
-            fica mais fiel e não precisa de conversão.
-          </p>
-        )}
-        {loading && (
-          <p className="mt-3 text-sm text-muted-foreground">
-            {stage ?? "Gerando o material…"} Isso costuma levar de 20 a 90 segundos.
-          </p>
-        )}
-        {!loading && !attachedFile && (
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                onClick={() => setTopic(ex)}
-                className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
-              >
-                {ex}
-              </button>
-            ))}
+            )}
+            <span>
+              {attachedFile
+                ? "A IA identifica o tema sozinha ao ler o arquivo."
+                : "ou arraste a aula para esta página · até 50 MB"}
+            </span>
           </div>
-        )}
-      </section>
 
-      <section className="mt-16">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <BookOpen className="size-5 text-primary" />
-            <h2 className="text-2xl font-semibold">Tópicos estudados</h2>
-          </div>
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar tópico…"
-            className="h-10 w-full rounded-xl bg-card shadow-soft sm:w-64"
-          />
-        </div>
-        {topics.isLoading ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => <div key={i} className="card-soft h-24 animate-pulse" />)}
-          </div>
-        ) : !topics.data?.length ? (
-          <div className="card-soft p-8 text-center text-muted-foreground">
-            Nenhum tópico ainda. Gere o seu primeiro material acima.
-          </div>
-        ) : !filtered.length ? (
-          <div className="card-soft p-8 text-center text-muted-foreground">
-            Nenhum tópico encontrado para “{search}”.
-          </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((t, i) => {
-              const p = progress.data?.[t.id];
-              return (
-                <Link
-                  key={t.id}
-                  to="/topico/$id"
-                  params={{ id: t.id }}
-                  className="card-soft group relative animate-fade-up p-5 transition-all hover:-translate-y-0.5 hover:shadow-lift"
-                  style={{ animationDelay: `${i * 40}ms` }}
-                >
+          {attachedFile && (
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm text-foreground/85">
+              <Checkbox
+                checked={keepFile}
+                onCheckedChange={(v) => setKeepFile(v === true)}
+                disabled={loading}
+                className="mt-0.5"
+              />
+              <span>
+                Guardar o arquivo original
+                {attachedFile.kind === "pptx" ? " (convertido em PDF)" : ""} para ver ao lado do
+                resumo
+              </span>
+            </label>
+          )}
+          {attachedFile?.kind === "pptx" && keepFile && (
+            <p className="mt-2 max-w-[60ch] text-xs leading-relaxed text-muted-foreground">
+              Dica: se puder, exporte a aula como PDF no PowerPoint (Arquivo → Exportar → PDF) e
+              envie o PDF. A prévia fica mais fiel e não precisa de conversão.
+            </p>
+          )}
+          <p aria-live="polite" className={cn("text-sm text-muted-foreground", loading && "mt-3")}>
+            {loading
+              ? `${stage ?? "Gerando o material…"} Isso costuma levar de 20 a 90 segundos.`
+              : ""}
+          </p>
+          {!loading && !attachedFile && (
+            <p className="mt-4 flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-muted-foreground">
+              <span className="mr-1">Sugestões:</span>
+              {EXAMPLES.map((ex, i) => (
+                <span key={ex} className="inline-flex items-center">
                   <button
                     type="button"
-                    title="Excluir tópico"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setDeleteTarget({ id: t.id, title: t.title }); }}
-                    className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                    onClick={() => {
+                      setTopic(ex);
+                      document.getElementById("novo-topico")?.focus();
+                    }}
+                    className="rounded-sm text-foreground/85 underline decoration-border decoration-1 underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
                   >
-                    <Trash2 className="size-4" />
+                    {ex}
                   </button>
-                  <h3 className="pr-6 text-lg font-semibold leading-snug group-hover:text-primary">{t.title}</h3>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {new Date(t.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
-                  </p>
-                  {p && (
-                    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                      <p>{p.fcSeen} de {p.fcTotal} flashcards revisados</p>
-                      <p>{p.mcSeen} de {p.mcTotal} questões revisadas</p>
-                      <p>{p.exams} {p.exams === 1 ? "prova feita" : "provas feitas"}</p>
-                    </div>
+                  {i < EXAMPLES.length - 1 && (
+                    <span aria-hidden className="ml-1">
+                      ·
+                    </span>
                   )}
-                </Link>
+                </span>
+              ))}
+            </p>
+          )}
+        </form>
+      </section>
+
+      <dl className="mt-12 grid grid-cols-3 border-y border-border">
+        {[
+          { v: topics.data ? String(topics.data.length) : "—", l: "tópicos no caderno" },
+          { v: totals ? `${fcPct}%` : "—", l: "dos flashcards revisados" },
+          {
+            v: totals ? String(totals.exams) : "—",
+            l: totals?.exams === 1 ? "prova feita" : "provas feitas",
+          },
+        ].map((it, i) => (
+          <div
+            key={it.l}
+            className={cn(
+              "flex flex-col-reverse py-4",
+              i > 0 && "border-l border-border pl-4 sm:pl-5",
+            )}
+          >
+            <dt className="text-xs text-muted-foreground sm:text-sm">{it.l}</dt>
+            <dd className="font-serif text-[2rem] leading-none tnum sm:text-[2.5rem]">{it.v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <section aria-labelledby="titulo-topicos" className="mt-10">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <h2 id="titulo-topicos" className="text-[1.9rem] leading-none">
+            Seus tópicos
+          </h2>
+          <div className="relative w-full sm:w-64">
+            <Search
+              className="pointer-events-none absolute left-0 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <label htmlFor="busca-topicos" className="sr-only">
+              Buscar tópico
+            </label>
+            <input
+              id="busca-topicos"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar no caderno"
+              className="h-10 w-full border-b border-border bg-transparent pl-6 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring"
+            />
+          </div>
+        </div>
+
+        <div
+          aria-hidden
+          className="hidden border-b-[1.5px] border-foreground pb-2 text-[0.6875rem] font-medium uppercase tracking-[0.1em] text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_72px_84px_84px_128px_40px] md:gap-4"
+        >
+          <span>Tópico</span>
+          <span>Criado</span>
+          <span>Flashcards</span>
+          <span>Questões</span>
+          <span>Progresso</span>
+          <span />
+        </div>
+
+        {topics.isLoading ? (
+          <ul aria-label="Carregando tópicos" className="divide-y divide-border">
+            {[64, 48, 72].map((w, i) => (
+              <li key={i} className="py-5">
+                <div className="h-5 rounded bg-black/[0.06]" style={{ width: `${w}%` }} />
+              </li>
+            ))}
+          </ul>
+        ) : !topics.data?.length ? (
+          <div className="mt-4 rounded-lg border border-dashed border-border p-8 text-center">
+            <p className="font-serif text-2xl">Seu caderno está em branco</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Digite um tema ou anexe uma aula acima para criar o primeiro tópico.
+            </p>
+          </div>
+        ) : !filtered.length ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Nenhum tópico encontrado para “{search}”.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border border-b border-border">
+            {filtered.map((t, i) => {
+              const p = progress.data?.byTopic[t.id];
+              const pct = progressPct(p);
+              return (
+                <li
+                  key={t.id}
+                  className="group relative animate-fade-up py-4 md:grid md:grid-cols-[minmax(0,1fr)_72px_84px_84px_128px_40px] md:items-center md:gap-4"
+                  style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
+                >
+                  <div className="min-w-0 pr-12 md:pr-0">
+                    <Link
+                      to="/topico/$id"
+                      params={{ id: t.id }}
+                      title={t.label}
+                      className="line-clamp-2 rounded-sm font-serif text-[1.35rem] leading-[1.15] transition-colors after:absolute after:inset-0 after:content-[''] group-hover:text-foreground/75"
+                    >
+                      {t.label}
+                    </Link>
+                    <p className="mt-1.5 text-xs text-muted-foreground tnum md:hidden">
+                      {shortDate(t.created_at)} · {p?.fcSeen ?? 0}/{p?.fcTotal ?? 0} flashcards ·{" "}
+                      {p?.mcSeen ?? 0}/{p?.mcTotal ?? 0} questões · {pct}%
+                    </p>
+                  </div>
+                  <span className="hidden text-sm text-muted-foreground tnum md:block">
+                    {shortDate(t.created_at)}
+                  </span>
+                  <span className="hidden text-sm tnum md:block">
+                    <span className="sr-only">Flashcards revisados: </span>
+                    {p ? `${p.fcSeen}/${p.fcTotal}` : "—"}
+                  </span>
+                  <span className="hidden text-sm tnum md:block">
+                    <span className="sr-only">Questões revisadas: </span>
+                    {p ? `${p.mcSeen}/${p.mcTotal}` : "—"}
+                  </span>
+                  <span className="hidden items-center gap-2.5 md:flex">
+                    <span aria-hidden className="relative h-[3px] w-16 rounded-full bg-border">
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-full bg-foreground"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </span>
+                    <span className="text-sm tnum">
+                      <span className="sr-only">Progresso: </span>
+                      {pct}%
+                    </span>
+                  </span>
+                  <div className="absolute right-0 top-3.5 z-10 md:static">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={`Mais opções de ${t.label}`}
+                          className="flex size-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <Ellipsis className="size-4" aria-hidden />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem asChild>
+                          <Link to="/topico/$id" params={{ id: t.id }}>
+                            Abrir
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setDeleteTarget({ id: t.id, title: t.label })}
+                          className="gap-2 text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="size-4" aria-hidden /> Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </section>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir "{deleteTarget?.title}"?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir “{deleteTarget?.title}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              Isso apaga o resumo, mapa mental, flashcards, questões e casos clínicos desse tópico. Não pode ser desfeito.
+              Isso apaga o resumo, o esquema, os flashcards, as questões e os casos clínicos deste
+              tópico. Não pode ser desfeito.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteTopic} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={confirmDeleteTopic}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               {deleting ? "Excluindo…" : "Excluir"}
             </AlertDialogAction>
           </AlertDialogFooter>
