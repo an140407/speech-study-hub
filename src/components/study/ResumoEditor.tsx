@@ -58,6 +58,9 @@ export function ResumoEditor({
     ],
     content: html,
     editable: startEditing,
+    editorProps: {
+      attributes: { "aria-label": "Resumo do tópico", "aria-multiline": "true", lang: "pt-BR" },
+    },
     shouldRerenderOnTransaction: true,
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");

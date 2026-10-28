@@ -50,6 +50,9 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_authenticated/topico/$id")({
+  // A aba aberta fica na URL (?aba=questoes): recarregar ou compartilhar volta para ela
+  validateSearch: (s: Record<string, unknown>): { aba?: TabId } =>
+    TABS.some((t) => t.v === s["aba"]) ? { aba: s["aba"] as TabId } : {},
   head: () => ({
     meta: [
       { title: "Tópico de estudo — FonoLab" },
@@ -157,6 +160,7 @@ const TABS = [
   { v: "caso", label: "Caso clínico" },
   { v: "revisao", label: "Revisão" },
 ] as const;
+type TabId = (typeof TABS)[number]["v"];
 
 function RevisaoTab({
   topicId,
@@ -252,6 +256,8 @@ function TopicPage() {
   const [maskMode, setMaskMode] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  // "Renomear" no menu: ao fechar, o foco vai para o campo do título (e não volta ao botão ⋯)
+  const focusTitleAfterMenu = useRef(false);
   const [deleting, setDeleting] = useState(false);
   const queryClient = useQueryClient();
   const backfill = useServerFn(backfillSubtopics);
@@ -260,7 +266,16 @@ function TopicPage() {
   const [writingOwn, setWritingOwn] = useState(false);
   const [summaryVersion, setSummaryVersion] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [tab, setTab] = useState("resumo");
+  const { aba } = Route.useSearch();
+  const tab: TabId = aba && TABS.some((t) => t.v === aba) ? aba : "resumo";
+  const setTab = (v: string) =>
+    void navigate({
+      to: "/topico/$id",
+      params: { id },
+      search: v === "resumo" ? {} : { aba: v as TabId },
+      replace: true,
+      resetScroll: false,
+    });
   // "Praticar este ramo" no Esquema: abre os flashcards já filtrados pelo ramo
   const [practiceFocus, setPracticeFocus] = useState<{ subtopic: string; key: number } | null>(
     null,
@@ -426,7 +441,7 @@ function TopicPage() {
         >
           <Link
             to="/"
-            className="inline-flex shrink-0 items-center gap-1 rounded-sm transition-colors hover:text-foreground"
+            className="-my-2 inline-flex min-h-10 shrink-0 items-center gap-1 rounded-sm transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-4" aria-hidden /> Tópicos
           </Link>
@@ -486,8 +501,27 @@ function TopicPage() {
                 <Ellipsis className="size-4" aria-hidden />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onSelect={() => setRenaming(true)} className="gap-2">
+            <DropdownMenuContent
+              align="end"
+              className="w-52"
+              onCloseAutoFocus={(e) => {
+                if (!focusTitleAfterMenu.current) return;
+                e.preventDefault();
+                focusTitleAfterMenu.current = false;
+                window.requestAnimationFrame(() => {
+                  const el = document.getElementById("titulo-topico") as HTMLInputElement | null;
+                  el?.focus();
+                  el?.select();
+                });
+              }}
+            >
+              <DropdownMenuItem
+                onSelect={() => {
+                  focusTitleAfterMenu.current = true;
+                  setRenaming(true);
+                }}
+                className="gap-2"
+              >
                 <Pencil className="size-4" aria-hidden /> Renomear
               </DropdownMenuItem>
               {hasSource && !sourcePending.data && (
@@ -508,7 +542,10 @@ function TopicPage() {
       </div>
 
       {renaming ? (
-        <TitleEditor id={id} title={d.topic.title} onDone={() => setRenaming(false)} />
+        <>
+          <h1 className="sr-only">{displayTitle}</h1>
+          <TitleEditor id={id} title={d.topic.title} onDone={() => setRenaming(false)} />
+        </>
       ) : (
         <h1 className="mt-6 text-[2.35rem] leading-[1.04] tracking-[-0.02em] sm:text-5xl">
           {displayTitle}

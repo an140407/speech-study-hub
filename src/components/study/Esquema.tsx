@@ -231,9 +231,9 @@ export function Esquema({
               className={cn("flex flex-col rounded-xl p-5", t.bg)}
             >
               <div className="flex items-start justify-between gap-3">
-                <h3 id={headingId} className={cn("text-[1.65rem] leading-[1.08]", t.fg)}>
+                <h2 id={headingId} className={cn("text-[1.65rem] leading-[1.08]", t.fg)}>
                   {b.title}
-                </h3>
+                </h2>
                 {cover && (
                   <span className={cn("mt-1.5 shrink-0 text-xs font-medium tnum", t.fg)}>
                     {remembered} de {b.children.length}

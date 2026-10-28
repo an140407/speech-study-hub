@@ -115,12 +115,12 @@ function CaseView({
         aria-labelledby={`${panelId}-cenario`}
         className="rounded-xl border border-border bg-card px-6 py-5 shadow-soft"
       >
-        <h3
+        <h2
           id={`${panelId}-cenario`}
           className="font-sans text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground"
         >
           Cenário clínico
-        </h3>
+        </h2>
         <HighlightableBlock
           as="p"
           className="mt-3 whitespace-pre-line text-[1.0625rem] leading-relaxed"
@@ -134,9 +134,9 @@ function CaseView({
 
       <section aria-labelledby={`${panelId}-perguntas`}>
         <div className="flex items-baseline justify-between gap-3">
-          <h3 id={`${panelId}-perguntas`} className="text-[1.75rem] leading-none">
+          <h2 id={`${panelId}-perguntas`} className="text-[1.75rem] leading-none">
             Perguntas guiadas
-          </h3>
+          </h2>
           <span className="text-xs text-muted-foreground tnum">
             {revealed} de {total}
           </span>

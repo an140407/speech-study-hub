@@ -267,7 +267,7 @@ export function McqPractice({
               id="questao-atual"
               ref={headingRef}
               tabIndex={-1}
-              className="mt-2 text-[1.65rem] leading-[1.18] outline-none sm:text-[1.9rem]"
+              className="mt-2 text-[1.65rem] leading-[1.18] outline-none [text-wrap:pretty] sm:text-[1.9rem]"
             >
               {q.question}
             </h2>
@@ -390,7 +390,7 @@ export function McqPractice({
           <p className="text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
             Suas questões
           </p>
-          <ol className="mt-2.5 grid grid-cols-5 gap-2">
+          <ol className="mt-2.5 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-5">
             {list.map((x, i) => {
               const a = answers[x.id];
               const st =
@@ -568,13 +568,18 @@ function McqEditorDialog({
             <RadioGroup value={correct} onValueChange={setCorrect} className="mt-2 space-y-2">
               {options.map((opt, oi) => (
                 <div key={oi} className="flex items-center gap-2">
-                  <RadioGroupItem value={String(oi)} id={`mcq-opt-${oi}`} />
+                  <RadioGroupItem
+                    value={String(oi)}
+                    id={`mcq-opt-${oi}`}
+                    aria-label={`${LETTERS[oi]} é a correta`}
+                  />
                   <Input
                     value={opt}
                     onChange={(e) =>
                       setOptions((os) => os.map((o, i) => (i === oi ? e.target.value : o)))
                     }
-                    placeholder={`Alternativa ${LETTERS[oi]}`}
+                    placeholder={`Alternativa ${LETTERS[oi]}…`}
+                    aria-label={`Texto da alternativa ${LETTERS[oi]}`}
                     className="flex-1"
                   />
                 </div>

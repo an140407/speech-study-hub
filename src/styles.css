@@ -92,6 +92,7 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 0.5rem;
 
   /* Base */
@@ -158,6 +159,7 @@
 
 /* Tema escuro (ainda não tem botão para ligar; fica pronto para o futuro) */
 .dark {
+  color-scheme: dark;
   --paper: #161513;
   --ink: #ece8e1;
   --pen: #93a8f0;
@@ -214,6 +216,15 @@
   html {
     font-family: var(--font-sans);
     -webkit-text-size-adjust: 100%;
+    /* toque: sem atraso de duplo-toque e sem o flash cinza do iOS (o app já tem estados de foco/pressão) */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Rolar dentro de gaveta/janela não arrasta a página de trás */
+  [role="dialog"],
+  [role="alertdialog"] {
+    overscroll-behavior: contain;
   }
 
   body {

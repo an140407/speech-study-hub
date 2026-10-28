@@ -303,7 +303,7 @@ function ExamPage() {
                 <button
                   type="button"
                   onClick={() => setSelected(allSelected ? [] : allIds)}
-                  className="rounded-sm text-sm text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground"
+                  className="-my-2 inline-flex min-h-10 items-center rounded-sm text-sm text-foreground/80 underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground"
                 >
                   {allSelected ? "Limpar seleção" : "Selecionar todos"}
                 </button>
@@ -396,30 +396,33 @@ function ExamPage() {
 
       {stage === "running" && questions[current] && (
         <div className="mt-8">
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm text-muted-foreground">
+          <div className="flex items-center justify-between gap-4">
             <span className={eyebrow + " tnum"}>
               Questão {current + 1} de {questions.length}
             </span>
-            <div className="flex items-center gap-4">
-              <span
-                className={cn(
-                  "flex items-center gap-1.5 font-mono tnum",
-                  (seconds[current] ?? 0) >= SLOW_SECONDS && "text-destructive",
-                )}
-                title="Tempo nesta questão"
-              >
-                <Clock className="size-3.5" aria-hidden /> {fmt(seconds[current] ?? 0)}
-              </span>
-              <span className="font-mono tnum" title="Tempo total">
-                Total {fmt(totalSeconds)}
-              </span>
-              <span className="tnum">
-                {answeredCount} {answeredCount === 1 ? "respondida" : "respondidas"}
-              </span>
-              <Button variant="ghost" size="sm" className="h-9" onClick={exitExam}>
-                <X className="size-4" aria-hidden /> Sair<span className="sr-only"> da prova</span>
-              </Button>
-            </div>
+            <Button variant="ghost" size="sm" className="-mr-2 h-10" onClick={exitExam}>
+              <X className="size-4" aria-hidden /> Sair<span className="sr-only"> da prova</span>
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
+            <span
+              className={cn(
+                "flex items-center gap-1.5 whitespace-nowrap font-mono tnum",
+                (seconds[current] ?? 0) >= SLOW_SECONDS && "text-destructive",
+              )}
+              title="Tempo nesta questão"
+            >
+              <Clock className="size-3.5" aria-hidden />
+              <span className="sr-only">Tempo nesta questão: </span>
+              {fmt(seconds[current] ?? 0)}
+            </span>
+            <span className="whitespace-nowrap" title="Tempo total">
+              Total <span className="font-mono tnum">{fmt(totalSeconds)}</span>
+            </span>
+            <span className="whitespace-nowrap tnum">
+              {answeredCount} de {questions.length}{" "}
+              {questions.length === 1 ? "respondida" : "respondidas"}
+            </span>
           </div>
           <div
             role="progressbar"
@@ -436,7 +439,7 @@ function ExamPage() {
           </div>
 
           <div key={current} className="animate-fade-up">
-            <h2 className="mt-8 text-[1.65rem] leading-[1.18] sm:text-[1.9rem]">
+            <h2 className="mt-8 text-[1.65rem] leading-[1.18] [text-wrap:pretty] sm:text-[1.9rem]">
               {questions[current].question}
             </h2>
             <ol className="mt-6 space-y-2.5" aria-label="Alternativas">

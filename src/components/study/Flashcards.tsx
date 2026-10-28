@@ -166,58 +166,43 @@ export function Flashcards({
 
   return (
     <div className="grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-10">
-      <aside aria-label="Ramos dos flashcards" className="space-y-5">
-        <div>
-          <p className="px-3 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-            Ramos
-          </p>
-          <ul className="mt-2 space-y-0.5">
-            <li>
-              <button
-                type="button"
-                onClick={() => pick(null)}
-                aria-pressed={subtopic === null}
-                className={ramo(subtopic === null)}
-              >
-                <span>Todos</span>
-                <span className="text-xs text-muted-foreground tnum">{cards.length}</span>
-              </button>
-            </li>
-            {groups.map(([name, count]) => (
-              <li key={name}>
+      <div className="min-w-0 md:col-start-2 md:row-start-1">
+        {/* Celular: ramos numa faixa rolável acima do cartão (no PC ficam na lateral) */}
+        <div
+          role="group"
+          aria-label="Ramos dos flashcards"
+          className="-mx-5 mb-5 overflow-x-auto px-5 pb-1 [scrollbar-width:none] md:hidden"
+        >
+          <div className="flex w-max gap-2">
+            {[[null, cards.length] as const, ...groups].map(([name, count]) => {
+              const on = subtopic === name;
+              return (
                 <button
+                  key={name ?? "__todos"}
                   type="button"
                   onClick={() => pick(name)}
-                  aria-pressed={subtopic === name}
-                  className={ramo(subtopic === name)}
+                  aria-pressed={on}
+                  className={cn(
+                    "flex h-10 items-center gap-2 whitespace-nowrap rounded-full border px-4 text-sm transition-colors",
+                    on
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-card text-foreground/80 hover:text-foreground",
+                  )}
                 >
-                  <span className="min-w-0 truncate">{name}</span>
-                  <span className="text-xs text-muted-foreground tnum">{count}</span>
+                  {name ?? "Todos"}
+                  <span
+                    className={cn(
+                      "text-xs tnum",
+                      on ? "text-background/70" : "text-muted-foreground",
+                    )}
+                  >
+                    {count}
+                  </span>
                 </button>
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         </div>
-        <div className="space-y-2 border-t border-border pt-5">
-          <GenerateFlashcardsDialog
-            topicId={topicId}
-            total={cards.length}
-            subtopics={subtopicNames}
-          />
-          <CardEditorDialog
-            topicId={topicId}
-            subtopics={subtopicNames}
-            onSaved={refresh}
-            trigger={
-              <Button variant="ghost" className="h-9 w-full">
-                <Plus className="size-4" aria-hidden /> Criar cartão
-              </Button>
-            }
-          />
-        </div>
-      </aside>
-
-      <div className="min-w-0">
         {!card ? (
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
             <p className="font-serif text-2xl">Sem flashcards aqui</p>
@@ -320,8 +305,11 @@ export function Flashcards({
                     {card.front}
                   </p>
                   <span className="absolute bottom-4 flex items-center gap-2 text-xs text-muted-foreground">
-                    <RotateCw className="size-3.5" aria-hidden /> Clique ou aperte <kbd>Espaço</kbd>{" "}
-                    para ver a resposta
+                    <RotateCw className="size-3.5" aria-hidden />
+                    <span className="pointer-coarse:hidden">
+                      Clique ou aperte <kbd>Espaço</kbd> para ver a resposta
+                    </span>
+                    <span className="hidden pointer-coarse:inline">Toque para ver a resposta</span>
                   </span>
                 </div>
                 <div
@@ -341,7 +329,7 @@ export function Flashcards({
             <div className="mt-5 flex items-center gap-4">
               <Button variant="ghost" onClick={() => go(pos - 1)} disabled={pos === 0}>
                 <ArrowLeft className="size-4" aria-hidden />{" "}
-                <span className="hidden sm:inline">Anterior</span>
+                <span className="sr-only sm:not-sr-only">Anterior</span>
               </Button>
               <div className="min-w-0 flex-1">
                 <div
@@ -362,7 +350,7 @@ export function Flashcards({
                 </p>
               </div>
               <Button onClick={() => go(pos + 1)} disabled={isLast}>
-                <span className="hidden sm:inline">Próximo</span>{" "}
+                <span className="sr-only sm:not-sr-only">Próximo</span>{" "}
                 <ArrowRight className="size-4" aria-hidden />
               </Button>
             </div>
@@ -396,6 +384,56 @@ export function Flashcards({
           </>
         )}
       </div>
+      <aside aria-label="Organizar flashcards" className="space-y-5 md:col-start-1 md:row-start-1">
+        <div className="hidden md:block">
+          <p className="px-3 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Ramos
+          </p>
+          <ul className="mt-2 space-y-0.5">
+            <li>
+              <button
+                type="button"
+                onClick={() => pick(null)}
+                aria-pressed={subtopic === null}
+                className={ramo(subtopic === null)}
+              >
+                <span>Todos</span>
+                <span className="text-xs text-muted-foreground tnum">{cards.length}</span>
+              </button>
+            </li>
+            {groups.map(([name, count]) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  onClick={() => pick(name)}
+                  aria-pressed={subtopic === name}
+                  className={ramo(subtopic === name)}
+                >
+                  <span className="min-w-0 truncate">{name}</span>
+                  <span className="text-xs text-muted-foreground tnum">{count}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="space-y-2 border-t border-border pt-5">
+          <GenerateFlashcardsDialog
+            topicId={topicId}
+            total={cards.length}
+            subtopics={subtopicNames}
+          />
+          <CardEditorDialog
+            topicId={topicId}
+            subtopics={subtopicNames}
+            onSaved={refresh}
+            trigger={
+              <Button variant="ghost" className="h-9 w-full">
+                <Plus className="size-4" aria-hidden /> Criar cartão
+              </Button>
+            }
+          />
+        </div>
+      </aside>
     </div>
   );
 }

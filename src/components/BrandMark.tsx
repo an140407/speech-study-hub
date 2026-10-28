@@ -19,7 +19,15 @@ export function BrandMark({ className, title }: { className?: string; title?: st
       focusable="false"
     >
       <rect width="64" height="64" rx="14" fill="#1A1917" />
-      <rect x="12" y="38" width="40" height="10" rx="2" fill="#FFD84D" transform="rotate(-5 32 43)" />
+      <rect
+        x="12"
+        y="38"
+        width="40"
+        height="10"
+        rx="2"
+        fill="#FFD84D"
+        transform="rotate(-5 32 43)"
+      />
       <path d={F_PATH} fill="#FAF9F6" stroke="#FAF9F6" strokeWidth="3" strokeLinejoin="round" />
     </svg>
   );
@@ -28,7 +36,10 @@ export function BrandMark({ className, title }: { className?: string; title?: st
 /** "Fono" reto e "lab" itálico, em Instrument Serif. */
 export function Wordmark({ className }: { className?: string }) {
   return (
-    <span className={cn("font-serif text-[1.7rem] leading-none tracking-[-0.02em]", className)}>
+    <span
+      translate="no"
+      className={cn("font-serif text-[1.7rem] leading-none tracking-[-0.02em]", className)}
+    >
       Fono<i className="italic">lab</i>
     </span>
   );

@@ -94,12 +94,16 @@ export function progressPct(p: TopicProgress | undefined) {
  * em separadores. Não altera o que está salvo no banco.
  */
 export function cleanTitle(title: string) {
-  return title
-    .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\u{20E3}/gu, "")
-    .replace(/\s+\d{1,2}\.\s+/g, " · ")
-    .replace(/\s{2,}/g, " ")
-    .replace(/^[\s·]+|[\s·]+$/g, "")
-    .trim();
+  return (
+    title
+      .replace(/\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\u{20E3}/gu, "")
+      .replace(/\s+\d{1,2}\.\s+/g, " · ")
+      .replace(/\s{2,}/g, " ")
+      // o "·" e o "—" ficam presos à palavra anterior (não começam linha sozinhos)
+      .replace(/ ([·—–]) /g, "\u00A0$1 ")
+      .replace(/^[\s·]+|[\s·]+$/g, "")
+      .trim()
+  );
 }
 
 export function shortDate(iso: string) {

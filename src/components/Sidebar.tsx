@@ -114,7 +114,14 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
     const q = filter.trim().toLocaleLowerCase("pt-BR");
     return (topics.data ?? [])
       .map((t) => ({ ...t, label: cleanTitle(t.title) }))
-      .filter((t) => !q || t.label.toLocaleLowerCase("pt-BR").includes(q));
+      .filter(
+        (t) =>
+          !q ||
+          t.label
+            .replace(/\u00A0/g, " ")
+            .toLocaleLowerCase("pt-BR")
+            .includes(q),
+      );
   }, [topics.data, filter]);
 
   const name = (user?.user_metadata?.["full_name"] as string | undefined) ?? user?.email ?? "";
@@ -213,8 +220,8 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
               id={filterId}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filtrar"
-              className="h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:bg-sidebar-accent"
+              placeholder="Filtrar tópicos…"
+              className="h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-2 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:bg-sidebar-accent focus:shadow-[0_0_0_3px_rgb(35_70_168/18%)]"
             />
           </div>
         )}

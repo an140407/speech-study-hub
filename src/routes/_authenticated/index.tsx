@@ -158,7 +158,7 @@ function Index() {
     const q = search.trim().toLocaleLowerCase("pt-BR");
     return (topics.data ?? [])
       .map((t) => ({ ...t, label: cleanTitle(t.title) }))
-      .filter((t) => !q || t.label.toLocaleLowerCase("pt-BR").includes(q));
+      .filter((t) => !q || t.label.replace(/\u00A0/g, " ").toLocaleLowerCase("pt-BR").includes(q));
   }, [topics.data, search]);
 
   const totals = progress.data?.totals;
@@ -317,7 +317,7 @@ function Index() {
             dragging && "outline-dashed outline-foreground/40",
           )}
         >
-          <div className="flex items-center gap-3 border-b-[1.5px] border-foreground transition-colors focus-within:border-ring">
+          <div className="flex items-center gap-3 border-b-[1.5px] border-foreground transition-[border-color,box-shadow] focus-within:border-ring focus-within:shadow-[0_1.5px_0_0_var(--color-ring)]">
             {attachedFile ? (
               <div className="flex h-14 min-w-0 flex-1 items-center gap-2.5">
                 <FileText className="size-5 shrink-0" aria-hidden />
@@ -344,9 +344,11 @@ function Index() {
                 </label>
                 <input
                   id="novo-topico"
+                  name="tema"
+                  enterKeyHint="go"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
-                  placeholder="Digite um tema ou o título da aula…"
+                  placeholder="Tema ou título da aula…"
                   autoComplete="off"
                   disabled={loading}
                   maxLength={120}
@@ -419,7 +421,7 @@ function Index() {
               : ""}
           </p>
           {!loading && !attachedFile && (
-            <p className="mt-4 flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-muted-foreground">
+            <p className="mt-3 flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
               <span className="mr-1">Sugestões:</span>
               {EXAMPLES.map((ex, i) => (
                 <span key={ex} className="inline-flex items-center">
@@ -429,7 +431,7 @@ function Index() {
                       setTopic(ex);
                       document.getElementById("novo-topico")?.focus();
                     }}
-                    className="rounded-sm text-foreground/85 underline decoration-border decoration-1 underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
+                    className="inline-flex min-h-8 items-center rounded-sm text-foreground/85 underline decoration-border decoration-1 underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
                   >
                     {ex}
                   </button>
@@ -484,8 +486,8 @@ function Index() {
               id="busca-topicos"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar no caderno"
-              className="h-10 w-full border-b border-border bg-transparent pl-6 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring"
+              placeholder="Buscar no caderno…"
+              className="h-10 w-full border-b border-border bg-transparent pl-6 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:shadow-[0_1px_0_0_var(--color-ring)]"
             />
           </div>
         </div>
