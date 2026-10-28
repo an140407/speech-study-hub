@@ -318,7 +318,7 @@ function TopicPage() {
   }, [q.data, id, queryClient]);
 
   function practiceBranch(target: PracticeTarget, subtopic: string | null) {
-    if (target === "flashcards" && subtopic) setPracticeFocus({ subtopic, key: Date.now() });
+    if (subtopic) setPracticeFocus({ subtopic, key: Date.now() });
     setTab(target);
     requestAnimationFrame(() =>
       document
@@ -401,6 +401,11 @@ function TopicPage() {
     flashcards: d.flashcards.length ? `${fcSeen}/${d.flashcards.length}` : null,
     questoes: d.mcq.length ? `${mcSeen}/${d.mcq.length}` : null,
   };
+
+  const mcqCounts = d.mcq.reduce<Record<string, number>>((acc, m) => {
+    if (m.subtopic) acc[m.subtopic] = (acc[m.subtopic] ?? 0) + 1;
+    return acc;
+  }, {});
 
   function openOriginal() {
     setTab("resumo");
@@ -641,10 +646,16 @@ function TopicPage() {
           )}
         </TabsContent>
         <TabsContent value="flashcards" className="mt-6 animate-fade-up">
-          <Flashcards cards={d.flashcards} topicId={id} focus={practiceFocus} />
+          <Flashcards
+            cards={d.flashcards}
+            topicId={id}
+            focus={practiceFocus}
+            mcqCounts={mcqCounts}
+            onGoQuestions={(sub) => practiceBranch("questoes", sub)}
+          />
         </TabsContent>
         <TabsContent value="questoes" className="mt-6 animate-fade-up">
-          <McqPractice questions={d.mcq} topicId={id} />
+          <McqPractice questions={d.mcq} topicId={id} focus={practiceFocus} />
         </TabsContent>
         <TabsContent value="caso" className="mt-6 animate-fade-up">
           <ClinicalCase cases={d.cases} topicId={id} maskMode={maskMode} />

@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Loader2, RotateCw, Sparkles, Layers, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Loader2,
+  RotateCw,
+  Sparkles,
+  Plus,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -7,13 +16,32 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,11 +55,16 @@ export function Flashcards({
   cards,
   topicId,
   focus,
+  mcqCounts,
+  onGoQuestions,
 }: {
   cards: FlashcardRow[];
   topicId: string;
   /** Vem do "Praticar este ramo" do Esquema: abre já filtrado pelo ramo. */
   focus?: { subtopic: string; key: number } | null;
+  /** Quantas questões existem por ramo, para sugerir o próximo passo. */
+  mcqCounts?: Record<string, number>;
+  onGoQuestions?: (subtopic: string | null) => void;
 }) {
   const [subtopic, setSubtopic] = useState<string | null>(focus?.subtopic ?? null);
   const [i, setI] = useState(0);
@@ -60,11 +93,23 @@ export function Flashcards({
     [cards, subtopic],
   );
 
-  const card = filtered[Math.min(i, filtered.length - 1)];
+  const pos = Math.min(i, Math.max(0, filtered.length - 1));
+  const card = filtered[pos];
+  const isLast = pos >= filtered.length - 1;
+  const nextQuestions = subtopic
+    ? (mcqCounts?.[subtopic] ?? 0)
+    : Object.values(mcqCounts ?? {}).reduce((n, v) => n + v, 0);
 
   function go(n: number) {
+    if (n < 0 || n >= filtered.length) return;
     setFlipped(false);
     setTimeout(() => setI(n), 150);
+  }
+
+  function pick(name: string | null) {
+    setSubtopic(name);
+    setFlipped(false);
+    setI(0);
   }
 
   async function handleFlip() {
@@ -79,133 +124,275 @@ export function Flashcards({
     }
   }
 
+  // Atalhos: Espaço vira, ← → navegam
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Logo depois de clicar na aba, o foco fica nela: Espaço vira o cartão,
+      // mas as setas continuam trocando de aba (padrão do componente de abas)
+      const onTab = !!t?.closest("[role='tab']");
+      if (onTab && e.key !== " ") return;
+      if (
+        !onTab &&
+        t?.closest(
+          "input, textarea, select, button, [role='button'], [contenteditable='true'], [role='dialog'], [role='menu']",
+        )
+      )
+        return;
+      if (!card) return;
+      if (e.key === " ") {
+        e.preventDefault();
+        void handleFlip();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        go(pos + 1);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        go(pos - 1);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const ramo = (active: boolean) =>
+    cn(
+      "flex min-h-10 w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
+      active
+        ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--color-border)]"
+        : "text-foreground/80 hover:bg-accent hover:text-foreground",
+    );
+
   return (
-    <div className="grid gap-6 md:grid-cols-[220px_1fr]">
-      <aside className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Layers className="size-4 text-primary" /> Sub-tópicos
-        </div>
-        <button
-          type="button"
-          onClick={() => { setSubtopic(null); go(0); }}
-          className={cn(
-            "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-            subtopic === null ? "border-primary/50 bg-accent" : "border-border bg-card hover:bg-muted",
-          )}
-        >
-          <span>Todos</span>
-          <span className="text-xs text-muted-foreground">{cards.length}</span>
-        </button>
-        <ul className="space-y-1.5">
-          {groups.map(([name, count]) => (
-            <li key={name}>
+    <div className="grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-10">
+      <aside aria-label="Ramos dos flashcards" className="space-y-5">
+        <div>
+          <p className="px-3 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Ramos
+          </p>
+          <ul className="mt-2 space-y-0.5">
+            <li>
               <button
                 type="button"
-                onClick={() => { setSubtopic(name); go(0); }}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-                  subtopic === name ? "border-primary/50 bg-accent" : "border-border bg-card hover:bg-muted",
-                )}
+                onClick={() => pick(null)}
+                aria-pressed={subtopic === null}
+                className={ramo(subtopic === null)}
               >
-                <span className="flex min-w-0 items-center gap-1">
-                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{name}</span>
-                </span>
-                <span className="text-xs text-muted-foreground">{count}</span>
+                <span>Todos</span>
+                <span className="text-xs text-muted-foreground tnum">{cards.length}</span>
               </button>
             </li>
-          ))}
-        </ul>
-        <GenerateFlashcardsDialog topicId={topicId} total={cards.length} subtopics={subtopicNames} />
-        <CardEditorDialog
-          topicId={topicId}
-          subtopics={subtopicNames}
-          onSaved={refresh}
-          trigger={
-            <Button variant="outline" className="w-full">
-              <Plus className="size-4" /> Criar card
-            </Button>
-          }
-        />
+            {groups.map(([name, count]) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  onClick={() => pick(name)}
+                  aria-pressed={subtopic === name}
+                  className={ramo(subtopic === name)}
+                >
+                  <span className="min-w-0 truncate">{name}</span>
+                  <span className="text-xs text-muted-foreground tnum">{count}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="space-y-2 border-t border-border pt-5">
+          <GenerateFlashcardsDialog
+            topicId={topicId}
+            total={cards.length}
+            subtopics={subtopicNames}
+          />
+          <CardEditorDialog
+            topicId={topicId}
+            subtopics={subtopicNames}
+            onSaved={refresh}
+            trigger={
+              <Button variant="ghost" className="h-9 w-full">
+                <Plus className="size-4" aria-hidden /> Criar cartão
+              </Button>
+            }
+          />
+        </div>
       </aside>
 
-      <div className="mx-auto w-full max-w-xl">
+      <div className="min-w-0">
         {!card ? (
-          <p className="text-muted-foreground">Sem flashcards neste sub-tópico.</p>
+          <div className="rounded-lg border border-dashed border-border p-8 text-center">
+            <p className="font-serif text-2xl">Sem flashcards aqui</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Gere mais com IA ou crie o seu cartão.
+            </p>
+          </div>
         ) : (
           <>
-            <div className="mb-3 flex items-center justify-center gap-3">
-              <p className="text-center text-xs text-muted-foreground">
-                Cartão {Math.min(i, filtered.length - 1) + 1} de {filtered.length} · clique para virar
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground tnum">
+                {card.subtopic ?? "Sem ramo"} · cartão {pos + 1} de {filtered.length}
               </p>
-              <CardEditorDialog
-                topicId={topicId}
-                card={card}
-                subtopics={subtopicNames}
-                onSaved={refresh}
-                trigger={
-                  <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">
-                    <Pencil className="size-3.5" /> Editar
-                  </button>
-                }
-              />
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive">
-                    <Trash2 className="size-3.5" /> Excluir
-                  </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Excluir este card?</AlertDialogTitle>
-                    <AlertDialogDescription>Não pode ser desfeito.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      onClick={async () => {
-                        const { error } = await supabase.from("flashcards").delete().eq("id", card.id);
-                        if (error) { toast.error("Falha ao excluir o card."); return; }
-                        toast.success("Card excluído.");
-                        setI((v) => Math.max(0, v - 1));
-                        refresh();
-                      }}
+              <div className="-mr-2 flex shrink-0">
+                <CardEditorDialog
+                  topicId={topicId}
+                  card={card}
+                  subtopics={subtopicNames}
+                  onSaved={refresh}
+                  trigger={
+                    <button
+                      type="button"
+                      aria-label="Editar cartão"
+                      title="Editar cartão"
+                      className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
-                      Excluir
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                      <Pencil className="size-4" aria-hidden />
+                    </button>
+                  }
+                />
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Excluir cartão"
+                      title="Excluir cartão"
+                      className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="size-4" aria-hidden />
+                    </button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Excluir este cartão?</AlertDialogTitle>
+                      <AlertDialogDescription>Não pode ser desfeito.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={async () => {
+                          const { error } = await supabase
+                            .from("flashcards")
+                            .delete()
+                            .eq("id", card.id);
+                          if (error) {
+                            toast.error("Falha ao excluir o cartão.");
+                            return;
+                          }
+                          toast.success("Cartão excluído.");
+                          setI((v) => Math.max(0, v - 1));
+                          refresh();
+                        }}
+                      >
+                        Excluir
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
             </div>
-            <div className="flip-scene h-72 cursor-pointer select-none" onClick={handleFlip}>
+
+            <div
+              role="button"
+              tabIndex={0}
+              aria-pressed={flipped}
+              aria-label={
+                flipped
+                  ? `Resposta: ${card.back}. Aperte para voltar à pergunta.`
+                  : `Pergunta: ${card.front}. Aperte para ver a resposta.`
+              }
+              onClick={() => void handleFlip()}
+              onKeyDown={(e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  e.preventDefault();
+                  void handleFlip();
+                }
+              }}
+              className="flip-scene h-72 cursor-pointer select-none rounded-xl sm:h-80"
+            >
               <div className={cn("flip-inner relative h-full w-full", flipped && "flipped")}>
-                <div className="flip-face card-soft absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-                  <span className="mb-3 text-xs font-medium uppercase tracking-wider text-primary">
-                    {card.subtopic ?? "Frente"}
+                <div
+                  aria-hidden={flipped}
+                  className="flip-face absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-border bg-card px-8 py-10 text-center shadow-lift"
+                >
+                  <span className="text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    Pergunta
                   </span>
-                  <p className="font-serif text-xl font-semibold leading-snug">{card.front}</p>
-                  <RotateCw className="absolute bottom-4 right-4 size-4 text-muted-foreground" />
+                  <p className="mt-4 max-w-[34ch] font-serif text-[1.6rem] leading-[1.2] [text-wrap:balance] sm:text-[1.85rem]">
+                    {card.front}
+                  </p>
+                  <span className="absolute bottom-4 flex items-center gap-2 text-xs text-muted-foreground">
+                    <RotateCw className="size-3.5" aria-hidden /> Clique ou aperte <kbd>Espaço</kbd>{" "}
+                    para ver a resposta
+                  </span>
                 </div>
-                <div className="flip-face flip-back absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-secondary bg-secondary p-8 text-center text-secondary-foreground shadow-soft">
-                  <span className="mb-3 text-xs font-medium uppercase tracking-wider opacity-70">Verso</span>
-                  <p className="text-base leading-relaxed">{card.back}</p>
+                <div
+                  aria-hidden={!flipped}
+                  className="flip-face flip-back absolute inset-0 flex flex-col items-center justify-center rounded-xl border border-tint-4-fg/15 bg-tint-4 px-8 py-10 text-center"
+                >
+                  <span className="text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-tint-4-fg">
+                    Resposta
+                  </span>
+                  <p className="mt-4 max-w-[52ch] text-[1.05rem] leading-relaxed text-foreground [text-wrap:pretty]">
+                    {card.back}
+                  </p>
                 </div>
               </div>
             </div>
-            <div className="mt-5 flex items-center justify-between">
-              <Button variant="outline" onClick={() => go(i - 1)} disabled={i === 0}>
-                <ArrowLeft className="size-4" /> Anterior
+
+            <div className="mt-5 flex items-center gap-4">
+              <Button variant="ghost" onClick={() => go(pos - 1)} disabled={pos === 0}>
+                <ArrowLeft className="size-4" aria-hidden />{" "}
+                <span className="hidden sm:inline">Anterior</span>
               </Button>
-              <div className="flex max-w-[50%] flex-wrap justify-center gap-1">
-                {filtered.map((_, k) => (
-                  <span key={k} className={cn("size-1.5 rounded-full", k === i ? "bg-primary" : "bg-border")} />
-                ))}
+              <div className="min-w-0 flex-1">
+                <div
+                  role="progressbar"
+                  aria-label="Progresso nos cartões"
+                  aria-valuemin={1}
+                  aria-valuemax={filtered.length}
+                  aria-valuenow={pos + 1}
+                  className="h-1 overflow-hidden rounded-full bg-border"
+                >
+                  <div
+                    className="h-full rounded-full bg-foreground transition-[width] duration-300"
+                    style={{ width: `${((pos + 1) / filtered.length) * 100}%` }}
+                  />
+                </div>
+                <p className="mt-1.5 text-center text-xs text-muted-foreground tnum">
+                  {pos + 1} de {filtered.length}
+                </p>
               </div>
-              <Button variant="outline" onClick={() => go(i + 1)} disabled={i >= filtered.length - 1}>
-                Próximo <ArrowRight className="size-4" />
+              <Button onClick={() => go(pos + 1)} disabled={isLast}>
+                <span className="hidden sm:inline">Próximo</span>{" "}
+                <ArrowRight className="size-4" aria-hidden />
               </Button>
             </div>
+
+            <p className="mt-4 hidden items-center gap-3 text-xs text-muted-foreground md:flex">
+              <span className="flex items-center gap-1.5">
+                <kbd>Espaço</kbd> virar
+              </span>
+              <span className="flex items-center gap-1.5">
+                <kbd>←</kbd>
+                <kbd>→</kbd> navegar
+              </span>
+            </p>
+
+            {isLast && flipped && onGoQuestions && nextQuestions > 0 && (
+              <div className="mt-6 flex animate-fade-up flex-wrap items-center gap-4 rounded-lg border border-border bg-card px-5 py-4">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">
+                    Próximo passo: {nextQuestions} {nextQuestions === 1 ? "questão" : "questões"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Fixe o que acabou de revisar respondendo as questões{" "}
+                    {subtopic ? `de ${subtopic}` : "do tópico"}.
+                  </p>
+                </div>
+                <Button variant="outline" onClick={() => onGoQuestions(subtopic)}>
+                  Responder <ArrowRight className="size-4" aria-hidden />
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -244,7 +431,10 @@ function CardEditorDialog({
   async function save() {
     const f = front.trim();
     const b = back.trim();
-    if (!f || !b) { toast.error("Preencha a frente e o verso do card."); return; }
+    if (!f || !b) {
+      toast.error("Preencha a frente e o verso do card.");
+      return;
+    }
     setSaving(true);
     try {
       if (card) {
@@ -277,28 +467,53 @@ function CardEditorDialog({
         <DialogHeader>
           <DialogTitle>{card ? "Editar card" : "Criar card"}</DialogTitle>
           <DialogDescription>
-            {card ? "Ajuste a frente, o verso ou o sub-tópico deste card." : "Escreva seu próprio flashcard pra esse tópico."}
+            {card
+              ? "Ajuste a frente, o verso ou o sub-tópico deste card."
+              : "Escreva seu próprio flashcard pra esse tópico."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium" htmlFor="card-front">Frente</label>
-            <Textarea id="card-front" rows={2} value={front} onChange={(e) => setFront(e.target.value)} className="mt-1" />
+            <label className="text-sm font-medium" htmlFor="card-front">
+              Frente
+            </label>
+            <Textarea
+              id="card-front"
+              rows={2}
+              value={front}
+              onChange={(e) => setFront(e.target.value)}
+              className="mt-1"
+            />
           </div>
           <div>
-            <label className="text-sm font-medium" htmlFor="card-back">Verso</label>
-            <Textarea id="card-back" rows={3} value={back} onChange={(e) => setBack(e.target.value)} className="mt-1" />
+            <label className="text-sm font-medium" htmlFor="card-back">
+              Verso
+            </label>
+            <Textarea
+              id="card-back"
+              rows={3}
+              value={back}
+              onChange={(e) => setBack(e.target.value)}
+              className="mt-1"
+            />
           </div>
           <div>
-            <label className="text-sm font-medium" htmlFor="card-subtopic">Sub-tópico</label>
-            <Select value={subtopic || "__none"} onValueChange={(v) => setSubtopic(v === "__none" ? "" : v)}>
+            <label className="text-sm font-medium" htmlFor="card-subtopic">
+              Sub-tópico
+            </label>
+            <Select
+              value={subtopic || "__none"}
+              onValueChange={(v) => setSubtopic(v === "__none" ? "" : v)}
+            >
               <SelectTrigger id="card-subtopic" className="mt-1">
                 <SelectValue placeholder="Sem sub-tópico" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">Sem sub-tópico</SelectItem>
                 {subtopics.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -315,7 +530,15 @@ function CardEditorDialog({
   );
 }
 
-function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: string; total: number; subtopics: string[] }) {
+function GenerateFlashcardsDialog({
+  topicId,
+  total,
+  subtopics,
+}: {
+  topicId: string;
+  total: number;
+  subtopics: string[];
+}) {
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(5);
   const [focus, setFocus] = useState<string[]>([]);
@@ -327,7 +550,9 @@ function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: stri
   async function run() {
     setLoading(true);
     try {
-      const res = await generate({ data: { topic_id: topicId, count, subtopics: focus.length ? focus : undefined } });
+      const res = await generate({
+        data: { topic_id: topicId, count, subtopics: focus.length ? focus : undefined },
+      });
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
       toast.success(`${res.inserted} flashcards adicionados.`);
       setOpen(false);
@@ -341,8 +566,8 @@ function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: stri
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="mt-3 w-full" disabled={remaining === 0}>
-          <Sparkles className="size-4" /> Gerar mais flashcards
+        <Button variant="outline" className="h-9 w-full" disabled={remaining === 0}>
+          <Sparkles className="size-4" aria-hidden /> Gerar mais cartões
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -354,14 +579,20 @@ function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: stri
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium" htmlFor="qtd-cards">Quantidade</label>
+            <label className="text-sm font-medium" htmlFor="qtd-cards">
+              Quantidade
+            </label>
             <Input
               id="qtd-cards"
               type="number"
               min={1}
               max={Math.min(30, remaining)}
               value={count}
-              onChange={(e) => setCount(Math.max(1, Math.min(Math.min(30, remaining), Number(e.target.value) || 1)))}
+              onChange={(e) =>
+                setCount(
+                  Math.max(1, Math.min(Math.min(30, remaining), Number(e.target.value) || 1)),
+                )
+              }
               className="mt-1"
             />
           </div>
@@ -374,7 +605,9 @@ function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: stri
                     <label className="flex cursor-pointer items-center gap-2 text-sm">
                       <Checkbox
                         checked={focus.includes(s)}
-                        onCheckedChange={(v) => setFocus((f) => (v ? [...f, s] : f.filter((x) => x !== s)))}
+                        onCheckedChange={(v) =>
+                          setFocus((f) => (v ? [...f, s] : f.filter((x) => x !== s)))
+                        }
                       />
                       <span>{s}</span>
                     </label>
@@ -386,7 +619,11 @@ function GenerateFlashcardsDialog({ topicId, total, subtopics }: { topicId: stri
         </div>
         <DialogFooter>
           <Button onClick={run} disabled={loading || remaining === 0}>
-            {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            {loading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Sparkles className="size-4" />
+            )}
             {loading ? "Gerando…" : "Gerar"}
           </Button>
         </DialogFooter>
