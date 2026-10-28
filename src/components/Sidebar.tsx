@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { GraduationCap, LogOut, NotebookPen, Plus, Search } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,8 +12,21 @@ import { cn } from "@/lib/utils";
  * - PC (≥1024 px): barra lateral fixa com navegação e o índice de tópicos.
  * - Tablet e celular: barra no topo com o botão "Índice", que abre a mesma barra numa gaveta.
  */
+/** Foca o campo de novo tópico assim que ele existir na tela (espera a navegação terminar). */
+function focusWhenReady(id: string, tries = 60) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.focus();
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
+  if (tries > 0) window.requestAnimationFrame(() => focusWhenReady(id, tries - 1));
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // "Novo tópico" clicado dentro da gaveta: depois que ela fechar, o foco vai para o campo
+  const focusAfterClose = useRef(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Fecha a gaveta ao trocar de página
@@ -61,10 +74,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="gaveta-indice"
           side="left"
           className="flex w-[300px] max-w-[85vw] bg-sidebar p-0 sm:max-w-[300px]"
+          onCloseAutoFocus={(e) => {
+            if (!focusAfterClose.current) return;
+            e.preventDefault();
+            focusAfterClose.current = false;
+            focusWhenReady("novo-topico");
+          }}
         >
           <SheetTitle className="sr-only">Índice</SheetTitle>
           <SheetDescription className="sr-only">Navegação e lista de tópicos</SheetDescription>
-          <SidebarContent pathname={pathname} />
+          <SidebarContent
+            pathname={pathname}
+            onNewTopic={() => {
+              focusAfterClose.current = true;
+              setOpen(false);
+            }}
+          />
         </SheetContent>
       </Sheet>
 
@@ -75,7 +100,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function SidebarContent({ pathname }: { pathname: string }) {
+function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic?: () => void }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const topics = useTopicsList();
@@ -103,8 +128,10 @@ function SidebarContent({ pathname }: { pathname: string }) {
       .join("") || "?";
 
   function newTopic() {
-    navigate({ to: "/" }).then(() => {
-      window.requestAnimationFrame(() => document.getElementById("novo-topico")?.focus());
+    // Na gaveta, quem foca o campo é a própria gaveta depois de fechar (senão ela devolve o foco a si mesma)
+    onNewTopic?.();
+    void navigate({ to: "/" }).then(() => {
+      if (!onNewTopic) focusWhenReady("novo-topico");
     });
   }
 

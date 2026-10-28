@@ -87,7 +87,11 @@ export function ResumoEditor({
   return (
     <div>
       {editing && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-1 rounded-lg border border-border bg-card p-1">
+        <div
+          role="toolbar"
+          aria-label="Formatação do resumo"
+          className="sticky top-[3.75rem] z-10 mb-3 flex flex-wrap items-center justify-between gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-soft backdrop-blur lg:top-3"
+        >
           <div className="flex flex-wrap items-center gap-1">
             <ToolbarBtn active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Título">
               <Heading2 className="size-4" />
@@ -136,7 +140,7 @@ export function ResumoEditor({
             )}
           </div>
           <div className="flex items-center gap-2 pr-1">
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground" aria-live="polite">
               {status === "saving" ? "Salvando…" : status === "saved" ? "Salvo" : ""}
             </span>
             <Button
@@ -159,10 +163,10 @@ export function ResumoEditor({
         </div>
       )}
       {!editing && (
-        <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
           {readActions}
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            <Pencil className="size-4" /> Editar
+            <Pencil className="size-4" aria-hidden /> Editar
           </Button>
         </div>
       )}
@@ -185,9 +189,11 @@ function ToolbarBtn({ active, onClick, title, children }: { active: boolean; onC
     <button
       type="button"
       title={title}
+      aria-label={title}
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+        "rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
         active && "bg-accent text-accent-foreground",
       )}
     >

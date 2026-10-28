@@ -361,6 +361,10 @@ mark.fono-highlight {
   outline: none;
   min-height: 200px;
 }
+.resumo-editor .ProseMirror h2,
+.resumo-editor .ProseMirror h3 {
+  scroll-margin-top: 5rem;
+}
 .resumo-editor.editing .ProseMirror {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

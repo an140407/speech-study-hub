@@ -4,6 +4,7 @@ import type { Database } from "@/integrations/supabase/types";
 import type { GeneratedMaterial } from "./study-types";
 import { uploadPdfToGeminiFiles } from "./gemini.server";
 import { aiBusyError, isBusyStatus } from "./ai-busy";
+import { delatex } from "@/lib/delatex";
 
 export const BUCKET = "source-files";
 export const MAX_SOURCE_BYTES = 50 * 1024 * 1024;
@@ -353,7 +354,9 @@ ESTRUTURA (cada item é um <h2>, nesta ordem; se um item realmente não se aplic
 8. Pontos-chave para a prova — lista
 9. Termos importantes — lista no formato "<strong>termo</strong>: definição curta"
 
-Use <h3> para subdivisões e tabelas sempre que houver comparação, classificação ou graus (ex.: tipos de perda auditiva, escalas).`;
+Use <h3> para subdivisões e tabelas sempre que houver comparação, classificação ou graus (ex.: tipos de perda auditiva, escalas).
+
+NÃO use LaTeX, cifrões ($) nem notação de fórmula. Escreva siglas, unidades e valores em texto comum, com caracteres Unicode quando precisar: SpO₂, O₂, ≥ 92%, ≤ 25 dB, ±, →.`;
 
 function cleanHtml(raw: string): string {
   let html = raw.trim();
@@ -365,7 +368,8 @@ function cleanHtml(raw: string): string {
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/javascript:/gi, "");
   if (!html.includes("<")) throw new Error("A IA não devolveu o resumo no formato esperado. Tente de novo.");
-  return html;
+  // rede de segurança: se ainda vier "$SpO_2$", vira "SpO₂"
+  return delatex(html, "html");
 }
 
 export type SummarySource =

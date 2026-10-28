@@ -30,8 +30,8 @@ export function ResumoSplitLayout({
 
   return (
     <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:items-start">
-      <div className="min-w-0 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-2">{summary}</div>
-      <div className="h-[70vh] min-w-0 lg:sticky lg:top-20 lg:h-[calc(100vh-6rem)]">{viewer}</div>
+      <div className="min-w-0 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto lg:pr-3">{summary}</div>
+      <div className="h-[70vh] min-w-0 lg:sticky lg:top-6 lg:h-[calc(100dvh-3rem)]">{viewer}</div>
     </div>
   );
 }
