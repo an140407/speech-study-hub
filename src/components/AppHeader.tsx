@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Ear, GraduationCap, LogOut, Menu } from "lucide-react";
+import { GraduationCap, LogOut, Menu } from "lucide-react";
+import { BrandMark, Wordmark } from "@/components/BrandMark";
 import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
@@ -19,13 +20,11 @@ export function AppHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-        <Link to="/" className="flex items-center gap-2">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-soft">
-            <Ear className="size-5" />
-          </span>
-          <span className="font-serif text-xl font-semibold tracking-tight">FonoLab</span>
+        <Link to="/" className="flex items-center gap-2.5 rounded-md" aria-label="FonoLab, ir para os tópicos">
+          <BrandMark className="size-8" />
+          <Wordmark />
         </Link>
         {user && (
           <>
@@ -49,6 +48,7 @@ export function AppHeader() {
               <button
                 onClick={handleSignOut}
                 title={user.email ?? "Sair"}
+                aria-label="Sair"
                 className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
               >
                 <LogOut className="size-4" />

@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Ear } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { lovable } from "@/integrations/lovable/index";
+import { BrandMark } from "@/components/BrandMark";
 
 export const Route = createFileRoute("/auth")({
   component: AuthPage,
@@ -43,16 +43,16 @@ function AuthPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4">
+    <main className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
       <div className="card-soft w-full max-w-sm p-8 text-center">
-        <div className="mx-auto flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <Ear className="size-5" />
-        </div>
-        <h1 className="mt-5 text-xl font-semibold tracking-tight">Entrar no FonoLab</h1>
+        <BrandMark className="mx-auto size-12" />
+        <h1 className="mt-6 text-4xl leading-none">
+          Entrar no Fono<i>lab</i>
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Use sua conta Google pra gerar e guardar seu material de estudo.
         </p>
-        <Button onClick={handleGoogle} disabled={busy} className="mt-6 h-11 w-full rounded-xl">
+        <Button onClick={handleGoogle} disabled={busy} className="mt-6 h-11 w-full rounded-md">
           {busy ? "Conectando…" : "Continuar com Google"}
         </Button>
       </div>
