@@ -38,6 +38,8 @@ export function McqPractice({ questions, topicId }: { questions: McqRow[]; topic
     if (!q.seen_at) {
       await supabase.rpc("mark_mcq_seen", { p_mcq_id: q.id });
       queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
+      // atualiza o "Praticado" do Esquema
+      refresh();
     }
   }
 

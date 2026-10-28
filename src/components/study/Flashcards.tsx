@@ -23,12 +23,28 @@ import type { FlashcardRow } from "@/lib/study-types";
 const MAX_CARDS = 100;
 const SEM_SUB = "Sem sub-tópico";
 
-export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId: string }) {
-  const [subtopic, setSubtopic] = useState<string | null>(null);
+export function Flashcards({
+  cards,
+  topicId,
+  focus,
+}: {
+  cards: FlashcardRow[];
+  topicId: string;
+  /** Vem do "Praticar este ramo" do Esquema: abre já filtrado pelo ramo. */
+  focus?: { subtopic: string; key: number } | null;
+}) {
+  const [subtopic, setSubtopic] = useState<string | null>(focus?.subtopic ?? null);
   const [i, setI] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [seen, setSeen] = useState<Record<string, boolean>>({});
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!focus) return;
+    setSubtopic(focus.subtopic);
+    setI(0);
+    setFlipped(false);
+  }, [focus?.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
 
@@ -58,6 +74,8 @@ export function Flashcards({ cards, topicId }: { cards: FlashcardRow[]; topicId:
       setSeen((s) => ({ ...s, [card.id]: true }));
       await supabase.rpc("mark_flashcard_seen", { p_flashcard_id: card.id });
       queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
+      // atualiza o "Praticado" do Esquema
+      queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
     }
   }
 

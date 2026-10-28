@@ -412,6 +412,75 @@ mark.fono-highlight {
   background: var(--accent);
 }
 
+/* Esquema: item coberto (riscos de "linha de caderno") */
+.esquema-cover {
+  background: repeating-linear-gradient(90deg, rgb(26 25 23 / 20%) 0 6px, transparent 6px 10px);
+}
+
+/* Esquema: versão para imprimir / salvar em PDF (montada no <body> só na hora de imprimir) */
+.esquema-portal {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  body:has(> .esquema-portal) > *:not(.esquema-portal) {
+    display: none !important;
+  }
+  .esquema-portal {
+    display: block;
+    color: var(--ink);
+    font-family: var(--font-sans);
+  }
+  .esquema-portal * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .esquema-print-kicker {
+    font-size: 9pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #6b665e;
+  }
+  .esquema-print-title {
+    font-family: var(--font-serif);
+    font-size: 26pt;
+    line-height: 1.1;
+    margin: 4pt 0 14pt;
+  }
+  .esquema-print-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8pt;
+  }
+  .esquema-print-block {
+    border-radius: 8pt;
+    padding: 10pt 12pt;
+    break-inside: avoid;
+  }
+  .esquema-print-block h2 {
+    font-family: var(--font-serif);
+    font-size: 16pt;
+    margin-bottom: 4pt;
+  }
+  .esquema-print-block li {
+    font-size: 10.5pt;
+    line-height: 1.4;
+    padding: 4pt 0;
+    border-top: 0.5pt solid rgb(26 25 23 / 12%);
+    min-height: 18pt;
+  }
+  .esquema-print-block li:first-child {
+    border-top: 0;
+  }
+  .esquema-print-blank {
+    display: block;
+    height: 12pt;
+    border-bottom: 0.75pt dotted rgb(26 25 23 / 45%);
+  }
+}
+
 /* Movimento reduzido: sem giro de cartão nem animações de entrada */
 @media (prefers-reduced-motion: reduce) {
   *,

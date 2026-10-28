@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { backfillSubtopics } from "@/lib/study-extra.functions";
-import { ArrowLeft, Brain, FileText, HelpCircle, Layers, ListChecks, Loader2, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, HelpCircle, Layers, ListChecks, ListTree, Loader2, Stethoscope, Highlighter, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { markdownToHtml } from "@/lib/markdown-to-html";
@@ -19,7 +19,7 @@ import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
 import { McqPractice } from "@/components/study/McqPractice";
-import { MindMap } from "@/components/study/MindMap";
+import { Esquema, type PracticeTarget } from "@/components/study/Esquema";
 import { ClinicalCase } from "@/components/study/ClinicalCase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,7 @@ export const Route = createFileRoute("/_authenticated/topico/$id")({
   head: () => ({
     meta: [
       { title: "Tópico de estudo — FonoLab" },
-      { name: "description", content: "Resumo, mapa mental, flashcards, questões, caso clínico e revisão de um tema de Fonoaudiologia." },
+      { name: "description", content: "Resumo, esquema, flashcards, questões, caso clínico e revisão de um tema de Fonoaudiologia." },
       { property: "og:title", content: "Tópico de estudo — FonoLab" },
       { property: "og:description", content: "Material completo de estudo de Fonoaudiologia gerado por IA." },
       { property: "og:type", content: "article" },
@@ -74,7 +74,7 @@ async function loadTopic(id: string) {
 
 const TABS = [
   { v: "resumo", label: "Resumo", Icon: FileText },
-  { v: "mapa", label: "Mapa Mental", Icon: Brain },
+  { v: "esquema", label: "Esquema", Icon: ListTree },
   { v: "flashcards", label: "Flashcards", Icon: Layers },
   { v: "questoes", label: "Questões", Icon: ListChecks },
   { v: "caso", label: "Caso Clínico", Icon: Stethoscope },
@@ -158,6 +158,9 @@ function TopicPage() {
   const [writingOwn, setWritingOwn] = useState(false);
   const [summaryVersion, setSummaryVersion] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [tab, setTab] = useState("resumo");
+  // "Praticar este ramo" no Esquema: abre os flashcards já filtrados pelo ramo
+  const [practiceFocus, setPracticeFocus] = useState<{ subtopic: string; key: number } | null>(null);
   const genSummary = useServerFn(generateSummary);
   const sourceUrlFn = useServerFn(getSourceFileUrl);
   const removeTopic = useServerFn(deleteTopicFn);
@@ -203,6 +206,14 @@ function TopicPage() {
       .eq("type", "summary")
       .then(() => queryClient.invalidateQueries({ queryKey: ["topic", id] }));
   }, [q.data, id, queryClient]);
+
+  function practiceBranch(target: PracticeTarget, subtopic: string | null) {
+    if (target === "flashcards" && subtopic) setPracticeFocus({ subtopic, key: Date.now() });
+    setTab(target);
+    requestAnimationFrame(() =>
+      document.getElementById("topico-abas")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }
 
   async function deleteTopic() {
     setDeleting(true);
@@ -278,7 +289,7 @@ function TopicPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir "{d.topic.title}"?</AlertDialogTitle>
             <AlertDialogDescription>
-              Isso apaga o resumo, mapa mental, flashcards, questões e casos clínicos desse tópico. Não pode ser desfeito.
+              Isso apaga o resumo, o esquema, os flashcards, as questões e os casos clínicos deste tópico. Não pode ser desfeito.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -290,8 +301,8 @@ function TopicPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Tabs defaultValue="resumo" className="mt-6">
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-card p-1 shadow-soft">
+      <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        <TabsList id="topico-abas" className="scroll-mt-24 h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-card p-1 shadow-soft">
           {TABS.map(({ v, label, Icon }) => (
             <TabsTrigger key={v} value={v} className="flex-1 gap-1.5 rounded-lg py-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
               <Icon className="size-4" /> <span>{label}</span>
@@ -365,11 +376,15 @@ function TopicPage() {
             })()}
           />
         </TabsContent>
-        <TabsContent value="mapa" className="mt-4 animate-fade-up">
-          {d.mindmap ? <MindMap map={d.mindmap} /> : <p className="text-muted-foreground">Sem mapa mental.</p>}
+        <TabsContent value="esquema" className="mt-4 animate-fade-up">
+          {d.mindmap ? (
+            <Esquema map={d.mindmap} topicId={id} flashcards={d.flashcards} mcq={d.mcq} onPractice={practiceBranch} />
+          ) : (
+            <p className="text-muted-foreground">Este tópico não tem esquema.</p>
+          )}
         </TabsContent>
         <TabsContent value="flashcards" className="mt-4 animate-fade-up">
-          <Flashcards cards={d.flashcards} topicId={id} />
+          <Flashcards cards={d.flashcards} topicId={id} focus={practiceFocus} />
         </TabsContent>
         <TabsContent value="questoes" className="mt-4 animate-fade-up">
           <McqPractice questions={d.mcq} topicId={id} />
