@@ -70,8 +70,18 @@ export const Route = createFileRoute("/_authenticated/topico/$id")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: TopicPage,
+  component: TopicRoute,
 });
+
+/**
+ * Trocar de tópico pela barra lateral reaproveita a mesma rota, então a página não
+ * desmontava: o editor do Resumo (e os estados locais das abas) ficavam com o tópico
+ * anterior. A chave pelo id recria a página inteira a cada tópico.
+ */
+function TopicRoute() {
+  const { id } = Route.useParams();
+  return <TopicPage key={id} />;
+}
 
 /** Resumo sem texto (ex.: "<p></p>" de quem abriu o editor e não escreveu) conta como vazio. */
 function isEmptyHtml(html: string) {
