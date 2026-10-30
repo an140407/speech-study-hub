@@ -37,8 +37,11 @@ export function ResumoEditor({
   const [editing, setEditing] = useState(startEditing);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Última versão ainda não salva (o salvamento espera 0,8 s depois da última tecla)
+  const pending = useRef<string | null>(null);
 
   async function save(content: string) {
+    pending.current = null;
     const { error } = await supabase
       .from("materials")
       .update({ content: { html: content } })
@@ -64,16 +67,27 @@ export function ResumoEditor({
     shouldRerenderOnTransaction: true,
     onUpdate: ({ editor: ed }) => {
       setStatus("saving");
+      pending.current = ed.getHTML();
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => void save(ed.getHTML()), 800);
     },
   });
 
   useEffect(() => {
-    editor?.setEditable(editing);
+    // false = não dispara "update": só ligar/desligar a edição não é mudança no texto
+    // (antes isso regravava o resumo inteiro no banco toda vez que a página abria)
+    editor?.setEditable(editing, false);
   }, [editing, editor]);
 
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // Saiu da página (outro tópico, outra tela) com digitação ainda não salva: salva agora
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+      if (pending.current !== null) void save(pending.current);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   if (!editor) return null;
 
