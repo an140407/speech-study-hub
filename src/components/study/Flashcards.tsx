@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { generateMoreFlashcards } from "@/lib/study-extra.functions";
 import type { FlashcardRow } from "@/lib/study-types";
+import { QuantityPicker } from "@/components/study/QuantityPicker";
 
 const MAX_CARDS = 100;
 const SEM_SUB = "Sem sub-tópico";
@@ -584,12 +585,22 @@ function GenerateFlashcardsDialog({
   const generate = useServerFn(generateMoreFlashcards);
   const queryClient = useQueryClient();
   const remaining = Math.max(0, MAX_CARDS - total);
+  const maxBatch = Math.min(30, remaining); // a IA gera no máximo 30 por pedido
+
+  function onOpenChange(v: boolean) {
+    if (v) setCount(Math.max(1, Math.min(5, maxBatch)));
+    setOpen(v);
+  }
 
   async function run() {
     setLoading(true);
     try {
       const res = await generate({
-        data: { topic_id: topicId, count, subtopics: focus.length ? focus : undefined },
+        data: {
+          topic_id: topicId,
+          count: Math.max(1, Math.min(count, maxBatch)),
+          subtopics: focus.length ? focus : undefined,
+        },
       });
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
       toast.success(`${res.inserted} flashcards adicionados.`);
@@ -602,7 +613,7 @@ function GenerateFlashcardsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" className="h-9 w-full" disabled={remaining === 0}>
           <Sparkles className="size-4" aria-hidden /> Gerar mais cartões
@@ -612,28 +623,11 @@ function GenerateFlashcardsDialog({
         <DialogHeader>
           <DialogTitle>Gerar mais flashcards</DialogTitle>
           <DialogDescription>
-            Você tem {total} de {MAX_CARDS} flashcards neste tópico. Pode adicionar até {remaining}.
+            Este tópico tem {total} de {MAX_CARDS} flashcards. Ainda cabem {remaining}.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium" htmlFor="qtd-cards">
-              Quantidade
-            </label>
-            <Input
-              id="qtd-cards"
-              type="number"
-              min={1}
-              max={Math.min(30, remaining)}
-              value={count}
-              onChange={(e) =>
-                setCount(
-                  Math.max(1, Math.min(Math.min(30, remaining), Number(e.target.value) || 1)),
-                )
-              }
-              className="mt-1"
-            />
-          </div>
+          <QuantityPicker id="qtd-cards" value={count} onChange={setCount} max={maxBatch} />
           {subtopics.length > 0 && (
             <div>
               <p className="text-sm font-medium">Focar em sub-tópicos (opcional)</p>

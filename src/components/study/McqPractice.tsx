@@ -48,6 +48,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { explainMcq, generateMoreMcq } from "@/lib/study-extra.functions";
 import type { McqRow } from "@/lib/study-types";
+import { QuantityPicker } from "@/components/study/QuantityPicker";
 
 const LETTERS = ["A", "B", "C", "D"];
 const MAX_MCQ = 50;
@@ -686,11 +687,19 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
   const generate = useServerFn(generateMoreMcq);
   const queryClient = useQueryClient();
   const remaining = Math.max(0, MAX_MCQ - total);
+  const maxBatch = Math.min(20, remaining); // a IA gera no máximo 20 por pedido
+
+  function onOpenChange(v: boolean) {
+    if (v) setCount(Math.max(1, Math.min(5, maxBatch)));
+    setOpen(v);
+  }
 
   async function run() {
     setLoading(true);
     try {
-      const res = await generate({ data: { topic_id: topicId, count } });
+      const res = await generate({
+        data: { topic_id: topicId, count: Math.max(1, Math.min(count, maxBatch)) },
+      });
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
       toast.success(`${res.inserted} questões adicionadas.`);
       setOpen(false);
@@ -702,7 +711,7 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="h-9" disabled={remaining === 0}>
           <Sparkles className="size-4" aria-hidden /> Gerar mais
@@ -712,25 +721,10 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
         <DialogHeader>
           <DialogTitle>Gerar mais questões</DialogTitle>
           <DialogDescription>
-            Pode adicionar até {remaining} questões neste tópico.
+            Este tópico tem {total} de {MAX_MCQ} questões. Ainda cabem {remaining}.
           </DialogDescription>
         </DialogHeader>
-        <div>
-          <label className="text-sm font-medium" htmlFor="qtd-mcq">
-            Quantidade
-          </label>
-          <Input
-            id="qtd-mcq"
-            type="number"
-            min={1}
-            max={Math.min(20, remaining)}
-            value={count}
-            onChange={(e) =>
-              setCount(Math.max(1, Math.min(Math.min(20, remaining), Number(e.target.value) || 1)))
-            }
-            className="mt-1"
-          />
-        </div>
+        <QuantityPicker id="qtd-mcq" value={count} onChange={setCount} max={maxBatch} />
         <DialogFooter>
           <Button onClick={run} disabled={loading || remaining === 0}>
             {loading ? (
