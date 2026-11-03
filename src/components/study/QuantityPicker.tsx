@@ -25,6 +25,8 @@ export function QuantityPicker({
 }) {
   // Texto em digitação; null = mostra o valor confirmado (botões e atalhos aparecem na hora)
   const [draft, setDraft] = useState<string | null>(null);
+  // Tentou passar do máximo: o campo trava no limite e o aviso embaixo fica em destaque
+  const [capped, setCapped] = useState(false);
   const hintId = useId();
   const clamp = (n: number) => Math.max(1, Math.min(max, Math.round(n)));
 
@@ -39,6 +41,7 @@ export function QuantityPicker({
   const step = (d: number) => {
     const n = draft === null ? value : Number.parseInt(draft, 10);
     setDraft(null);
+    setCapped(false);
     onChange(clamp((Number.isFinite(n) ? n : value) + d));
   };
   // Enquanto digita, o atalho marcado acompanha o que está no campo
@@ -73,9 +76,18 @@ export function QuantityPicker({
           enterKeyHint="done"
           value={draft ?? String(value)}
           aria-describedby={hintId}
-          onChange={(e) => setDraft(e.target.value.replace(/\D/g, "").slice(0, 3))}
+          maxLength={String(max).length}
+          onChange={(e) => {
+            const digits = e.target.value.replace(/\D/g, "").slice(0, String(max).length);
+            const over = Number.parseInt(digits, 10) > max;
+            setCapped(over);
+            setDraft(over ? String(max) : digits);
+          }}
           onFocus={(e) => e.currentTarget.select()}
-          onBlur={commit}
+          onBlur={() => {
+            commit();
+            setCapped(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -107,7 +119,10 @@ export function QuantityPicker({
             <button
               key={p}
               type="button"
-              onClick={() => onChange(p)}
+              onClick={() => {
+                setCapped(false);
+                onChange(p);
+              }}
               aria-pressed={typed === p}
               className={cn(
                 "h-9 min-w-12 rounded-full border px-3 text-sm tnum transition-colors",
@@ -122,8 +137,15 @@ export function QuantityPicker({
         </div>
       )}
 
-      <p id={hintId} className="mt-2 text-xs text-muted-foreground tnum">
-        De 1 a {max} por vez.
+      <p
+        id={hintId}
+        aria-live="polite"
+        className={cn(
+          "mt-2 text-xs tnum transition-colors",
+          capped ? "font-medium text-tint-3-fg" : "text-muted-foreground",
+        )}
+      >
+        {capped ? `O máximo é ${max} por vez.` : `De 1 a ${max} por vez.`}
       </p>
     </div>
   );
