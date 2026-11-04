@@ -14,6 +14,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { QuestionStem } from "@/components/study/QuestionStem";
+import { AiWait } from "@/components/study/AiWait";
+import { aiErrorMessage, aiRetryLabel, withAiRetry } from "@/lib/ai-busy";
+import { recordAttempts } from "@/lib/attempts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -104,6 +108,10 @@ export function McqPractice({
   async function answer(oi: number, item: McqRow) {
     if (answers[item.id] !== undefined) return;
     setAnswers((a) => ({ ...a, [item.id]: oi }));
+    // Registra a resposta (base do Caderno de erros e das estatísticas)
+    void recordAttempts([{ question_id: item.id, chosen_index: oi, source: "pratica" }]).then(() =>
+      queryClient.invalidateQueries({ queryKey: ["mcq-attempts"] }),
+    );
     setAnnounce(
       oi === item.correct_index
         ? "Resposta correta."
@@ -264,14 +272,13 @@ export function McqPractice({
               </div>
             </div>
 
-            <h2
+            <QuestionStem
               id="questao-atual"
               ref={headingRef}
               tabIndex={-1}
-              className="mt-2 text-[1.65rem] leading-[1.18] outline-none [text-wrap:pretty] sm:text-[1.9rem]"
-            >
-              {q.question}
-            </h2>
+              className="mt-2"
+              question={q.question}
+            />
 
             <ol className="mt-6 space-y-2.5" aria-label="Alternativas">
               {q.options.map((opt, oi) => {
@@ -304,8 +311,8 @@ export function McqPractice({
                         aria-hidden
                         className={cn(
                           "flex size-8 shrink-0 items-center justify-center rounded-full border text-[0.8125rem] font-semibold",
-                          state === "correct" && "border-transparent bg-tint-1-fg text-white",
-                          state === "wrong" && "border-transparent bg-tint-3-fg text-white",
+                          state === "correct" && "border-transparent bg-tint-1-fg text-background",
+                          state === "wrong" && "border-transparent bg-tint-3-fg text-background",
                           (state === "idle" || state === "dim") &&
                             "border-border text-muted-foreground",
                         )}
@@ -643,34 +650,46 @@ function AiExplanation({
 }) {
   const [text, setText] = useState(initial);
   const [loading, setLoading] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const explain = useServerFn(explainMcq);
   const queryClient = useQueryClient();
 
   async function run() {
     setLoading(true);
     try {
-      const res = await explain({ data: { mcq_id: mcqId } });
+      const res = await withAiRetry(
+        () => explain({ data: { mcq_id: mcqId } }),
+        (s) => setRetryMsg(aiRetryLabel(s)),
+      );
       setText(res.ai_explanation);
       queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao gerar a explicação.");
+      toast.error(aiErrorMessage(e, "Falha ao gerar a explicação."));
     } finally {
       setLoading(false);
+      setRetryMsg(null);
     }
   }
 
   return (
     <div className="mt-3">
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-9 bg-card/70"
-        onClick={run}
-        disabled={loading}
-      >
-        {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-        {loading ? "Explicando…" : text ? "Explicar de novo com IA" : "Explicar com IA"}
-      </Button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 bg-card/70"
+          onClick={run}
+          disabled={loading}
+        >
+          {/* Enquanto espera, o círculo e o tempo ficam só na linha ao lado */}
+          <Sparkles className="size-4" aria-hidden />
+          {text ? "Explicar de novo com IA" : "Explicar com IA"}
+        </Button>
+        <AiWait active={loading} label={retryMsg ?? "Explicando a questão"} />
+        <span aria-live="polite" className="sr-only">
+          {loading ? (retryMsg ?? "Explicando a questão.") : ""}
+        </span>
+      </div>
       {text && (
         <div className="mt-3 animate-fade-up whitespace-pre-line rounded-md bg-card/80 p-3 text-sm leading-relaxed">
           {text}
@@ -684,6 +703,7 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(5);
   const [loading, setLoading] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const generate = useServerFn(generateMoreMcq);
   const queryClient = useQueryClient();
   const remaining = Math.max(0, MAX_MCQ - total);
@@ -697,16 +717,19 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
   async function run() {
     setLoading(true);
     try {
-      const res = await generate({
-        data: { topic_id: topicId, count: Math.max(1, Math.min(count, maxBatch)) },
-      });
+      const n = Math.max(1, Math.min(count, maxBatch));
+      const res = await withAiRetry(
+        () => generate({ data: { topic_id: topicId, count: n } }),
+        (s) => setRetryMsg(aiRetryLabel(s)),
+      );
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
       toast.success(`${res.inserted} questões adicionadas.`);
       setOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao gerar questões.");
+      toast.error(aiErrorMessage(e, "Falha ao gerar questões."));
     } finally {
       setLoading(false);
+      setRetryMsg(null);
     }
   }
 
@@ -725,14 +748,17 @@ function GenerateMcqDialog({ topicId, total }: { topicId: string; total: number 
           </DialogDescription>
         </DialogHeader>
         <QuantityPicker id="qtd-mcq" value={count} onChange={setCount} max={maxBatch} />
-        <DialogFooter>
+        <DialogFooter className="sm:items-center">
+          <AiWait
+            active={loading}
+            label={retryMsg ?? "Escrevendo as questões"}
+            className="justify-center sm:mr-auto"
+          />
+          <span aria-live="polite" className="sr-only">
+            {loading ? (retryMsg ?? "Gerando as questões.") : ""}
+          </span>
           <Button onClick={run} disabled={loading || remaining === 0}>
-            {loading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Sparkles className="size-4" />
-            )}
-            {loading ? "Gerando…" : "Gerar"}
+            <Sparkles className="size-4" aria-hidden /> Gerar
           </Button>
         </DialogFooter>
       </DialogContent>

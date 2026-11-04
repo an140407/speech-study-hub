@@ -133,8 +133,16 @@ function convertMath(src: string) {
 /**
  * @param mode "html" para HTML (não atravessa tags) ou "text" para texto puro.
  */
+/** A IA às vezes marca ênfase com *asteriscos simples*, que apareceriam crus na tela. "**negrito**" fica como está. */
+function stripSingleEmphasis(text: string): string {
+  if (!text.includes("*")) return text;
+  return text.replace(/(^|[^\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])/g, "$1$2");
+}
+
 export function delatex(input: string, mode: "html" | "text" = "text"): string {
-  if (!input || !input.includes("$")) return input;
+  if (!input) return input;
+  if (mode === "text") input = stripSingleEmphasis(input);
+  if (!input.includes("$")) return input;
   // em HTML, "<" só entra se não for início de tag
   const inner = mode === "html" ? "(?:[^$<\\n]|<(?![A-Za-z/!]))" : "[^$\\n]";
   const re = new RegExp(

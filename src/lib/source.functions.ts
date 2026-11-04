@@ -47,7 +47,13 @@ const kindSchema = z.enum(["pdf", "pptx"]);
 export const prepareSourceUpload = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: unknown) =>
-    z.object({ hash: hashSchema, kind: kindSchema, size: z.number().int().positive().max(MAX_SOURCE_BYTES) }).parse(input),
+    z
+      .object({
+        hash: hashSchema,
+        kind: kindSchema,
+        size: z.number().int().positive().max(MAX_SOURCE_BYTES),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     await cleanupStaleIncoming(context.userId).catch(() => undefined);
@@ -56,7 +62,8 @@ export const prepareSourceUpload = createServerFn({ method: "POST" })
   });
 
 const UPLOAD_PATH_RE = /^incoming\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(pdf|pptx)$/;
-const FILE_URI_RE = /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[A-Za-z0-9_-]+$/;
+const FILE_URI_RE =
+  /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[A-Za-z0-9_-]+$/;
 
 /** Etapa 1 (curta): verifica o arquivo, envia pro Gemini, guarda/converte se pedido e apaga o temporário.
  *  Não gera nada com IA aqui, pra caber no tempo máximo de uma requisição. */
@@ -102,10 +109,17 @@ export const ingestSource = createServerFn({ method: "POST" })
         if (data.keep && !existing) {
           await storeSourcePdf(data.hash, "pdf", bytes, "").catch((e) => {
             console.error("Falha ao guardar", e);
-            warnings.push("Não foi possível guardar o arquivo original — o tópico será criado sem a prévia.");
+            warnings.push(
+              "Não foi possível guardar o arquivo original — o tópico será criado sem a prévia.",
+            );
           });
         }
-        return { file_uri: fileUri, text: null, convert_path: null, warning: warnings.join(" ") || null };
+        return {
+          file_uri: fileUri,
+          text: null,
+          convert_path: null,
+          warning: warnings.join(" ") || null,
+        };
       }
 
       const text = await extractPptxText(bytes);
@@ -118,7 +132,8 @@ export const ingestSource = createServerFn({ method: "POST" })
       if (isAiBusy(e)) keepUpload = true;
       throw e;
     } finally {
-      if (data.upload_path && !keepUpload) await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
+      if (data.upload_path && !keepUpload)
+        await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
     }
   });
 
@@ -171,7 +186,10 @@ export const transcribeTopicSource = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!topic) throw new Error("Tópico não encontrado.");
     const text = await transcribePdf(data.file_uri);
-    const shared = topic.source_hash && (await hasClaim(context.userId, topic.source_hash)) ? topic.source_hash : null;
+    const shared =
+      topic.source_hash && (await hasClaim(context.userId, topic.source_hash))
+        ? topic.source_hash
+        : null;
     if (text) await saveTopicSourceText(topic.id, text, shared);
     return { ok: true };
   });
@@ -188,7 +206,11 @@ async function assertCanConvert(userId: string, hash: string, uploadPath: string
 }
 
 async function assertOwnTopic(supabase: SupabaseClient<Database>, topicId: string) {
-  const { data } = await supabase.from("topics").select("id, source_text, source_hash").eq("id", topicId).maybeSingle();
+  const { data } = await supabase
+    .from("topics")
+    .select("id, source_text, source_hash")
+    .eq("id", topicId)
+    .maybeSingle();
   if (!data) throw new Error("Tópico não encontrado.");
   return data;
 }
@@ -222,14 +244,25 @@ export const startTopicConversion = createServerFn({ method: "POST" })
         return { status: "done" as const, job_id: null };
       }
       const bytes = await downloadObject(data.upload_path);
-      if ((await sha256Hex(bytes)) !== data.hash) throw new Error("O arquivo enviado não confere com o original.");
+      if ((await sha256Hex(bytes)) !== data.hash)
+        throw new Error("O arquivo enviado não confere com o original.");
       if (!isZipBytes(bytes)) throw new Error("O arquivo enviado não é um PPTX válido.");
       if (canConvertInline(bytes.length)) {
-        await finishConversion(context.userId, topic.id, data.hash, await convertWithCloudmersive(bytes), topic.source_text, data.upload_path);
+        await finishConversion(
+          context.userId,
+          topic.id,
+          data.hash,
+          await convertWithCloudmersive(bytes),
+          topic.source_text,
+          data.upload_path,
+        );
         return { status: "done" as const, job_id: null };
       }
       const tag = `${topic.id}:${data.hash}`;
-      return { status: "pending" as const, job_id: await startCloudConvertJob(data.upload_path, tag) };
+      return {
+        status: "pending" as const,
+        job_id: await startCloudConvertJob(data.upload_path, tag),
+      };
     } catch (e) {
       await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
       throw e;
@@ -239,14 +272,23 @@ export const startTopicConversion = createServerFn({ method: "POST" })
 /** Etapa 4b (segundo plano): consulta o job; quando termina, guarda o PDF e liga ao tópico. */
 export const pollTopicConversion = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((input: unknown) => convertInput.extend({ job_id: z.string().min(1).max(100) }).parse(input))
+  .validator((input: unknown) =>
+    convertInput.extend({ job_id: z.string().min(1).max(100) }).parse(input),
+  )
   .handler(async ({ data, context }) => {
     const topic = await assertOwnTopic(context.supabase, data.topic_id);
     await assertCanConvert(context.userId, data.hash, data.upload_path);
     try {
       const res = await checkCloudConvertJob(data.job_id, `${topic.id}:${data.hash}`);
       if (res.status === "pending") return { status: "pending" as const };
-      await finishConversion(context.userId, topic.id, data.hash, res.pdf, topic.source_text, data.upload_path);
+      await finishConversion(
+        context.userId,
+        topic.id,
+        data.hash,
+        res.pdf,
+        topic.source_text,
+        data.upload_path,
+      );
       return { status: "done" as const };
     } catch (e) {
       await removeOwnUpload(context.userId, data.upload_path).catch(() => undefined);
@@ -284,13 +326,35 @@ export const generateSummary = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!topic) throw new Error("Tópico não encontrado.");
 
+    // Fontes extras já incluídas no tópico (Etapa 10) entram junto quando houver texto da principal
+    const { data: extras } = await context.supabase
+      .from("topic_sources")
+      .select("name, text")
+      .eq("topic_id", topic.id)
+      .gt("position", 0)
+      .not("merged_at", "is", null)
+      .order("position");
+    const extraText = (extras ?? [])
+      .filter((s) => s.text?.trim())
+      .map((s) => `\n\n=== Fonte adicional: ${s.name ?? "sem nome"} ===\n${s.text}`)
+      .join("");
+
     let source: SummarySource = { type: "title" };
     const file =
-      topic.source_hash && (await hasClaim(context.userId, topic.source_hash)) ? await findSourceFile(topic.source_hash) : null;
-    if (file) {
-      source = { type: "pdf", fileUri: await uploadToGemini(await downloadObject(file.storage_path)) };
+      topic.source_hash && (await hasClaim(context.userId, topic.source_hash))
+        ? await findSourceFile(topic.source_hash)
+        : null;
+    if (extraText && topic.source_text?.trim()) {
+      source = { type: "text", text: `${topic.source_text}${extraText}`.slice(0, 250_000) };
+    } else if (file) {
+      source = {
+        type: "pdf",
+        fileUri: await uploadToGemini(await downloadObject(file.storage_path)),
+      };
     } else if (topic.source_text?.trim()) {
       source = { type: "text", text: topic.source_text };
+    } else if (extraText) {
+      source = { type: "text", text: extraText.trim() };
     }
 
     const html = await generateSummaryHtml(topic.title, source);
@@ -311,6 +375,7 @@ export const deleteTopic = createServerFn({ method: "POST" })
     if (!topic) throw new Error("Tópico não encontrado.");
     const { error } = await context.supabase.from("topics").delete().eq("id", topic.id);
     if (error) throw new Error("Falha ao excluir o tópico.");
-    if (topic.source_hash) await releaseSourceFile(topic.source_hash).catch((e) => console.error(e));
+    if (topic.source_hash)
+      await releaseSourceFile(topic.source_hash).catch((e) => console.error(e));
     return { ok: true };
   });

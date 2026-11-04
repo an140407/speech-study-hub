@@ -1,15 +1,30 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
 import { Table, TableRow, TableHeader, TableCell } from "@tiptap/extension-table";
 import {
-  Bold, Italic, Highlighter as HighlighterIcon, List, Heading2, Heading3, Pilcrow, Pencil, Check,
-  Table as TableIcon, BetweenHorizontalEnd, BetweenVerticalEnd, Rows3, Columns3, Trash2,
+  Bold,
+  Italic,
+  Highlighter as HighlighterIcon,
+  List,
+  Heading2,
+  Heading3,
+  Pilcrow,
+  Pencil,
+  Check,
+  Table as TableIcon,
+  BetweenHorizontalEnd,
+  BetweenVerticalEnd,
+  Rows3,
+  Columns3,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
+import { NewNoteButton, NotesExtension, NotesLayer } from "@/components/study/SummaryNotes";
 
 /** Editor de resumo estilo Google Docs simplificado: título/subtítulo/texto normal,
  *  negrito (Ctrl+B), itálico (Ctrl+I), lista (Ctrl+Shift+8 — atalhos padrão do TipTap)
@@ -34,6 +49,7 @@ export function ResumoEditor({
   /** Chamado ao clicar em Concluir, já com o conteúdo salvo. */
   onEditingDone?: (html: string) => void;
 }) {
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(startEditing);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +64,13 @@ export function ResumoEditor({
       .eq("topic_id", topicId)
       .eq("type", "summary");
     setStatus(error ? "idle" : "saved");
+    // Mantém a cópia da página em dia (índice, Ferramentas IA e exportar usam o resumo
+    // dela; sem isso, inserir uma tabela logo depois de grifar apagava os grifos novos)
+    if (!error) {
+      queryClient.setQueryData<{ summaryHtml?: string } | undefined>(["topic", topicId], (old) =>
+        old ? { ...old, summaryHtml: content } : old,
+      );
+    }
   }
 
   const editor = useEditor({
@@ -58,6 +81,7 @@ export function ResumoEditor({
       TableRow,
       TableHeader,
       TableCell,
+      NotesExtension,
     ],
     content: html,
     editable: startEditing,
@@ -94,8 +118,10 @@ export function ResumoEditor({
   // Fora do modo de edição, selecionar um trecho já grifa (ou remove o grifo, se já
   // estava grifado) — sem precisar de botão. É uma mutação programática, então
   // funciona mesmo com editable:false (que só bloqueia digitação/estrutura).
-  function handleReadModeMouseUp() {
+  function handleReadModeMouseUp(e: React.MouseEvent) {
     if (editing) return;
+    // Selecionar texto dentro de uma nota não grifa o resumo
+    if ((e.target as HTMLElement).closest("[data-note-widget]")) return;
     const { empty, to } = editor.state.selection;
     if (empty) return;
     editor.chain().toggleHighlight().setTextSelection(to).run();
@@ -110,47 +136,101 @@ export function ResumoEditor({
           className="sticky top-[3.75rem] z-10 mb-3 flex flex-wrap items-center justify-between gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-soft backdrop-blur lg:top-3"
         >
           <div className="flex flex-wrap items-center gap-1">
-            <ToolbarBtn active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Título">
+            <ToolbarBtn
+              active={editor.isActive("heading", { level: 2 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+              title="Título"
+            >
               <Heading2 className="size-4" />
             </ToolbarBtn>
-            <ToolbarBtn active={editor.isActive("heading", { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="Subtítulo">
+            <ToolbarBtn
+              active={editor.isActive("heading", { level: 3 })}
+              onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+              title="Subtítulo"
+            >
               <Heading3 className="size-4" />
             </ToolbarBtn>
-            <ToolbarBtn active={editor.isActive("paragraph")} onClick={() => editor.chain().focus().setParagraph().run()} title="Texto normal">
+            <ToolbarBtn
+              active={editor.isActive("paragraph")}
+              onClick={() => editor.chain().focus().setParagraph().run()}
+              title="Texto normal"
+            >
               <Pilcrow className="size-4" />
             </ToolbarBtn>
             <div className="mx-1 h-5 w-px bg-border" />
-            <ToolbarBtn active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()} title="Negrito (Ctrl+B)">
+            <ToolbarBtn
+              active={editor.isActive("bold")}
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              title="Negrito (Ctrl+B)"
+            >
               <Bold className="size-4" />
             </ToolbarBtn>
-            <ToolbarBtn active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()} title="Itálico (Ctrl+I)">
+            <ToolbarBtn
+              active={editor.isActive("italic")}
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              title="Itálico (Ctrl+I)"
+            >
               <Italic className="size-4" />
             </ToolbarBtn>
-            <ToolbarBtn active={editor.isActive("highlight")} onClick={() => editor.chain().focus().toggleHighlight().run()} title="Marcador">
+            <ToolbarBtn
+              active={editor.isActive("highlight")}
+              onClick={() => editor.chain().focus().toggleHighlight().run()}
+              title="Marcador"
+            >
               <HighlighterIcon className="size-4" />
             </ToolbarBtn>
-            <ToolbarBtn active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()} title="Lista (Ctrl+Shift+8)">
+            <ToolbarBtn
+              active={editor.isActive("bulletList")}
+              onClick={() => editor.chain().focus().toggleBulletList().run()}
+              title="Lista (Ctrl+Shift+8)"
+            >
               <List className="size-4" />
             </ToolbarBtn>
             <div className="mx-1 h-5 w-px bg-border" />
-            <ToolbarBtn active={false} onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Inserir tabela">
+            <ToolbarBtn
+              active={false}
+              onClick={() =>
+                editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+              }
+              title="Inserir tabela"
+            >
               <TableIcon className="size-4" />
             </ToolbarBtn>
             {editor.isActive("table") && (
               <>
-                <ToolbarBtn active={false} onClick={() => editor.chain().focus().addRowAfter().run()} title="Adicionar linha abaixo">
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => editor.chain().focus().addRowAfter().run()}
+                  title="Adicionar linha abaixo"
+                >
                   <BetweenHorizontalEnd className="size-4" />
                 </ToolbarBtn>
-                <ToolbarBtn active={false} onClick={() => editor.chain().focus().addColumnAfter().run()} title="Adicionar coluna à direita">
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => editor.chain().focus().addColumnAfter().run()}
+                  title="Adicionar coluna à direita"
+                >
                   <BetweenVerticalEnd className="size-4" />
                 </ToolbarBtn>
-                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteRow().run()} title="Remover linha">
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => editor.chain().focus().deleteRow().run()}
+                  title="Remover linha"
+                >
                   <Rows3 className="size-4" />
                 </ToolbarBtn>
-                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteColumn().run()} title="Remover coluna">
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => editor.chain().focus().deleteColumn().run()}
+                  title="Remover coluna"
+                >
                   <Columns3 className="size-4" />
                 </ToolbarBtn>
-                <ToolbarBtn active={false} onClick={() => editor.chain().focus().deleteTable().run()} title="Excluir tabela">
+                <ToolbarBtn
+                  active={false}
+                  onClick={() => editor.chain().focus().deleteTable().run()}
+                  title="Excluir tabela"
+                >
                   <Trash2 className="size-4" />
                 </ToolbarBtn>
               </>
@@ -182,26 +262,39 @@ export function ResumoEditor({
       {!editing && (
         <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
           {readActions}
+          <NewNoteButton editor={editor} topicId={topicId} />
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             <Pencil className="size-4" aria-hidden /> Editar
           </Button>
         </div>
       )}
-      <div onMouseUp={handleReadModeMouseUp}>
-        <EditorContent
-          editor={editor}
-          className={cn(
-            "prose-study resumo-editor min-h-[240px]",
-            editing && "editing",
-            !maskMode && "hide-marks",
-          )}
-        />
-      </div>
+      <NotesLayer editor={editor} topicId={topicId} enabled={!editing}>
+        <div onMouseUp={handleReadModeMouseUp}>
+          <EditorContent
+            editor={editor}
+            className={cn(
+              "prose-study resumo-editor min-h-[240px]",
+              editing && "editing",
+              !maskMode && "hide-marks",
+            )}
+          />
+        </div>
+      </NotesLayer>
     </div>
   );
 }
 
-function ToolbarBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: ReactNode }) {
+function ToolbarBtn({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"

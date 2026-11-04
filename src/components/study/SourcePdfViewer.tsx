@@ -6,11 +6,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 // Tipos mínimos para não depender dos tipos do pdfjs no carregamento do módulo.
 type PdfPage = {
   getViewport: (o: { scale: number }) => { width: number; height: number };
-  render: (o: { canvasContext: CanvasRenderingContext2D; viewport: unknown; canvas?: HTMLCanvasElement }) => { promise: Promise<void> };
+  render: (o: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: unknown;
+    canvas?: HTMLCanvasElement;
+  }) => { promise: Promise<void> };
 };
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage>; destroy: () => void };
 
-export function SourcePdfViewer({ url, loading, onClose }: { url: string | null; loading?: boolean; onClose: () => void }) {
+export function SourcePdfViewer({
+  url,
+  loading,
+  onClose,
+}: {
+  url: string | null;
+  loading?: boolean;
+  onClose: () => void;
+}) {
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [error, setError] = useState(false);
   const [current, setCurrent] = useState(1);
@@ -59,15 +71,28 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
       <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
         <div className="min-w-0">
           <p className="truncate font-medium text-foreground">Material original</p>
-          {doc && <p className="text-xs text-muted-foreground">Página {current} de {doc.numPages}</p>}
+          {doc && (
+            <p className="text-xs text-muted-foreground">
+              Página {current} de {doc.numPages}
+            </p>
+          )}
         </div>
-        <Button size="icon" variant="ghost" onClick={onClose} title="Minimizar">
-          <Minimize2 className="size-4" />
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onClose}
+          title="Minimizar"
+          aria-label="Minimizar o material original"
+        >
+          <Minimize2 className="size-4" aria-hidden />
         </Button>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-y-auto bg-muted p-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain bg-muted p-3">
         {error ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">Não foi possível abrir o material</p>
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            Não foi possível abrir o material. Feche e abra de novo; se continuar, recarregue a
+            página.
+          </p>
         ) : !doc || loading ? (
           <div className="space-y-3">
             <Skeleton className="h-[60vh] w-full" />
@@ -76,7 +101,14 @@ export function SourcePdfViewer({ url, loading, onClose }: { url: string | null;
         ) : (
           <div className="flex flex-col items-center gap-3">
             {Array.from({ length: doc.numPages }, (_, i) => (
-              <PdfPageCanvas key={i} doc={doc} pageNumber={i + 1} width={width} root={scrollRef.current} onVisible={setCurrent} />
+              <PdfPageCanvas
+                key={i}
+                doc={doc}
+                pageNumber={i + 1}
+                width={width}
+                root={scrollRef.current}
+                onVisible={setCurrent}
+              />
             ))}
           </div>
         )}
@@ -107,8 +139,14 @@ function PdfPageCanvas({
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const lazy = new IntersectionObserver(([e]) => e?.isIntersecting && setNear(true), { root, rootMargin: "600px 0px" });
-    const counter = new IntersectionObserver(([e]) => e?.isIntersecting && onVisible(pageNumber), { root, threshold: 0.5 });
+    const lazy = new IntersectionObserver(([e]) => e?.isIntersecting && setNear(true), {
+      root,
+      rootMargin: "600px 0px",
+    });
+    const counter = new IntersectionObserver(([e]) => e?.isIntersecting && onVisible(pageNumber), {
+      root,
+      threshold: 0.5,
+    });
     lazy.observe(el);
     counter.observe(el);
     return () => {

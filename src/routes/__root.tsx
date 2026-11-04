@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { BrandMark } from "@/components/BrandMark";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -40,10 +41,32 @@ function NotFoundComponent() {
   );
 }
 
+// Depois de uma atualização do app, uma aba aberta pode pedir um pedaço de código que mudou
+// de endereço. Não é bug do conteúdo: recarregar a página resolve.
+const STALE_CODE_ERROR =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i;
+const RELOAD_KEY = "fonolab:recarregou-em";
+
+/** Recarrega uma vez (no máximo a cada 10 s, para nunca entrar em loop). */
+function reloadForNewVersion(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!STALE_CODE_ERROR.test(message)) return false;
+  try {
+    const last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0);
+    if (Date.now() - last < 10_000) return false;
+    sessionStorage.setItem(RELOAD_KEY, String(Date.now()));
+  } catch {
+    return false;
+  }
+  window.location.reload();
+  return true;
+}
+
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
+    if (reloadForNewVersion(error)) return;
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
@@ -58,6 +81,10 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
         <div className="mt-8 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
+              if (STALE_CODE_ERROR.test(error instanceof Error ? error.message : String(error))) {
+                window.location.reload();
+                return;
+              }
               router.invalidate();
               reset();
             }}
@@ -119,8 +146,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -133,6 +161,18 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  // Mesmo caso no site publicado: o Vite avisa quando não acha um pedaço de código antigo.
+  useEffect(() => {
+    const onPreloadError = (event: Event) => {
+      const payload = (event as Event & { payload?: unknown }).payload;
+      if (reloadForNewVersion(payload ?? new Error("Failed to fetch dynamically imported module"))) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("vite:preloadError", onPreloadError);
+    return () => window.removeEventListener("vite:preloadError", onPreloadError);
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

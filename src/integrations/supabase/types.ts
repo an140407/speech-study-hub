@@ -87,6 +87,7 @@ export type Database = {
       }
       flashcards: {
         Row: {
+          origin_mcq_id: string | null
           back: string
           created_at: string
           front: string
@@ -96,6 +97,7 @@ export type Database = {
           topic_id: string
         }
         Insert: {
+          origin_mcq_id?: string | null
           back: string
           created_at?: string
           front: string
@@ -105,6 +107,7 @@ export type Database = {
           topic_id: string
         }
         Update: {
+          origin_mcq_id?: string | null
           back?: string
           created_at?: string
           front?: string
@@ -114,6 +117,13 @@ export type Database = {
           topic_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "flashcards_origin_mcq_id_fkey"
+            columns: ["origin_mcq_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_questions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "flashcards_topic_id_fkey"
             columns: ["topic_id"]
@@ -297,6 +307,7 @@ export type Database = {
       }
       topics: {
         Row: {
+          folder_id: string | null
           created_at: string
           id: string
           source_hash: string | null
@@ -307,6 +318,7 @@ export type Database = {
           user_id: string | null
         }
         Insert: {
+          folder_id?: string | null
           created_at?: string
           id?: string
           source_hash?: string | null
@@ -317,6 +329,7 @@ export type Database = {
           user_id?: string | null
         }
         Update: {
+          folder_id?: string | null
           created_at?: string
           id?: string
           source_hash?: string | null
@@ -328,6 +341,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "topics_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "topics_source_hash_fkey"
             columns: ["source_hash"]
             isOneToOne: false
@@ -336,11 +356,315 @@ export type Database = {
           },
         ]
       }
+      essay_answers: {
+        Row: {
+          answer: string
+          created_at: string
+          feedback: Json | null
+          id: string
+          question_id: string
+          score: number | null
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          answer: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          question_id: string
+          score?: number | null
+          topic_id?: string
+          user_id?: string
+        }
+        Update: {
+          answer?: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          question_id?: string
+          score?: number | null
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "essay_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "essay_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "essay_answers_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      essay_questions: {
+        Row: {
+          created_at: string
+          expected_answer: string
+          id: string
+          question: string
+          rubric: Json
+          subtopic: string | null
+          topic_id: string
+        }
+        Insert: {
+          created_at?: string
+          expected_answer?: string
+          id?: string
+          question: string
+          rubric?: Json
+          subtopic?: string | null
+          topic_id: string
+        }
+        Update: {
+          created_at?: string
+          expected_answer?: string
+          id?: string
+          question?: string
+          rubric?: Json
+          subtopic?: string | null
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "essay_questions_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      folders: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          parent_id: string | null
+          position: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          parent_id?: string | null
+          position?: number
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          parent_id?: string | null
+          position?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcq_attempts: {
+        Row: {
+          chosen_index: number
+          created_at: string
+          exam_attempt_id: string | null
+          id: string
+          is_correct: boolean
+          question_id: string
+          source: string
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          chosen_index: number
+          created_at?: string
+          exam_attempt_id?: string | null
+          id?: string
+          is_correct?: boolean
+          question_id: string
+          source: string
+          topic_id?: string
+          user_id?: string
+        }
+        Update: {
+          chosen_index?: number
+          created_at?: string
+          exam_attempt_id?: string | null
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          source?: string
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcq_attempts_exam_attempt_id_fkey"
+            columns: ["exam_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcq_attempts_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcq_attempts_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      topic_chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          topic_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          topic_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topic_chat_messages_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      topic_notes: {
+        Row: {
+          anchor_text: string | null
+          block_index: number
+          content: string
+          created_at: string
+          id: string
+          topic_id: string
+          updated_at: string
+        }
+        Insert: {
+          anchor_text?: string | null
+          block_index: number
+          content: string
+          created_at?: string
+          id?: string
+          topic_id: string
+          updated_at?: string
+        }
+        Update: {
+          anchor_text?: string | null
+          block_index?: number
+          content?: string
+          created_at?: string
+          id?: string
+          topic_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topic_notes_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      topic_sources: {
+        Row: {
+          created_at: string
+          hash: string | null
+          id: string
+          kind: string
+          merged_at: string | null
+          name: string | null
+          position: number
+          text: string | null
+          topic_id: string
+        }
+        Insert: {
+          created_at?: string
+          hash?: string | null
+          id?: string
+          kind: string
+          merged_at?: string | null
+          name?: string | null
+          position?: number
+          text?: string | null
+          topic_id: string
+        }
+        Update: {
+          created_at?: string
+          hash?: string | null
+          id?: string
+          kind?: string
+          merged_at?: string | null
+          name?: string | null
+          position?: number
+          text?: string | null
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topic_sources_hash_fkey"
+            columns: ["hash"]
+            isOneToOne: false
+            referencedRelation: "source_files"
+            referencedColumns: ["hash"]
+          },
+          {
+            foreignKeyName: "topic_sources_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      set_topic_material: {
+        Args: { p_content: Json; p_topic_id: string; p_type: string }
+        Returns: undefined
+      }
       add_clinical_case: {
         Args: {
           p_case_explanation: string

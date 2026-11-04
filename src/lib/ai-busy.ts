@@ -27,6 +27,10 @@ export function aiErrorMessage(e: unknown, fallback: string) {
   return e.message.replace(AI_BUSY_TAG, "").trim() || fallback;
 }
 
+/** Rótulo da espera enquanto o withAiRetry aguarda para tentar de novo. */
+export const aiRetryLabel = (seconds: number) =>
+  `A IA está congestionada. Tentando de novo em ${seconds} s…`;
+
 /** Tenta de novo quando a IA está congestionada: espera 5s, depois 10s (até 2 novas tentativas). */
 export async function withAiRetry<T>(
   fn: () => Promise<T>,

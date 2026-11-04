@@ -4,7 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { backfillSubtopics } from "@/lib/study-extra.functions";
-import { ArrowLeft, Ellipsis, FileText, Loader2, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Ellipsis,
+  FileDown,
+  FileStack,
+  FileText,
+  FolderInput,
+  Loader2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { ClinicalCaseRow, FlashcardRow, McqRow, Mindmap } from "@/lib/study-types";
 import { markdownToHtml } from "@/lib/markdown-to-html";
@@ -24,6 +34,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flashcards } from "@/components/study/Flashcards";
 import { McqPractice } from "@/components/study/McqPractice";
 import { Esquema, type PracticeTarget } from "@/components/study/Esquema";
+import { ExportDialog } from "@/components/study/ExportDialog";
+import { SourcesDialog } from "@/components/study/SourcesDialog";
+import { TopicChat } from "@/components/study/TopicChat";
+import { useTopicSources } from "@/lib/topic-sources";
+import { Flowchart } from "@/components/study/Flowchart";
+import { Segmented } from "@/components/study/Segmented";
 import { ClinicalCase } from "@/components/study/ClinicalCase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +53,12 @@ import {
 import { ResumoToc } from "@/components/study/ResumoToc";
 import { delatex } from "@/lib/delatex";
 import { cleanTitle } from "@/lib/topics-index";
+import { folderPath, useFolders } from "@/lib/folders";
+import { MoveTopicDialog } from "@/components/folders/FolderDialogs";
+import { EssayPractice } from "@/components/study/EssayPractice";
+import { SummaryTools } from "@/components/study/SummaryTools";
+import { MnemonicsPanel } from "@/components/study/MnemonicsPanel";
+import { useEssays } from "@/lib/essays";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -97,7 +119,7 @@ async function loadTopic(id: string) {
   const [topic, materials, flashcards, mcq, cases] = await Promise.all([
     supabase
       .from("topics")
-      .select("id, title, created_at, source_hash, source_kind, source_name")
+      .select("id, title, created_at, source_hash, source_kind, source_name, folder_id")
       .eq("id", id)
       .single(),
     supabase.from("materials").select("type, content").eq("topic_id", id),
@@ -167,6 +189,7 @@ const TABS = [
   { v: "esquema", label: "Esquema" },
   { v: "flashcards", label: "Flashcards" },
   { v: "questoes", label: "Questões" },
+  { v: "discursivas", label: "Discursivas" },
   { v: "caso", label: "Caso clínico" },
   { v: "revisao", label: "Revisão" },
 ] as const;
@@ -265,6 +288,12 @@ function TopicPage() {
   const q = useQuery({ queryKey: ["topic", id], queryFn: () => loadTopic(id) });
   const [maskMode, setMaskMode] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const extraSources = useTopicSources(id);
+  const essays = useEssays(id);
+  const folders = useFolders();
   const [renaming, setRenaming] = useState(false);
   // "Renomear" no menu: ao fechar, o foco vai para o campo do título (e não volta ao botão ⋯)
   const focusTitleAfterMenu = useRef(false);
@@ -275,6 +304,7 @@ function TopicPage() {
   const summaryMigrated = useRef(false);
   const [writingOwn, setWritingOwn] = useState(false);
   const [summaryVersion, setSummaryVersion] = useState(0);
+  const [esquemaView, setEsquemaView] = useState<"ramos" | "fluxograma">("ramos");
   const [viewerOpen, setViewerOpen] = useState(false);
   const { aba } = Route.useSearch();
   const tab: TabId = aba && TABS.some((t) => t.v === aba) ? aba : "resumo";
@@ -383,14 +413,14 @@ function TopicPage() {
   if (q.isLoading) {
     return (
       <main className="mx-auto w-full max-w-[960px] px-5 pt-8 sm:px-8 lg:pt-12" aria-busy="true">
-        <div className="h-4 w-40 animate-pulse rounded bg-black/[0.06]" />
-        <div className="mt-8 h-12 w-3/4 animate-pulse rounded bg-black/[0.06]" />
+        <div className="h-4 w-40 animate-pulse rounded bg-foreground/[0.06]" />
+        <div className="mt-8 h-12 w-3/4 animate-pulse rounded bg-foreground/[0.06]" />
         <div className="mt-10 h-px bg-border" />
         <div className="mt-8 space-y-3">
           {[92, 85, 96, 70].map((w, i) => (
             <div
               key={i}
-              className="h-4 animate-pulse rounded bg-black/[0.05]"
+              className="h-4 animate-pulse rounded bg-foreground/[0.05]"
               style={{ width: `${w}%` }}
             />
           ))}
@@ -425,6 +455,9 @@ function TopicPage() {
   const counts: Record<string, string | null> = {
     flashcards: d.flashcards.length ? `${fcSeen}/${d.flashcards.length}` : null,
     questoes: d.mcq.length ? `${mcSeen}/${d.mcq.length}` : null,
+    discursivas: essays.data?.questions.length
+      ? `${essays.data.questions.filter((q) => essays.data.answers[q.id]?.length).length}/${essays.data.questions.length}`
+      : null,
   };
 
   const mcqCounts = d.mcq.reduce<Record<string, number>>((acc, m) => {
@@ -456,6 +489,16 @@ function TopicPage() {
             <ArrowLeft className="size-4" aria-hidden /> Tópicos
           </Link>
           <span aria-hidden>/</span>
+          {folderPath(folders.data, d.topic.folder_id) && (
+            <>
+              <span className="hidden max-w-[16rem] truncate sm:inline">
+                {folderPath(folders.data, d.topic.folder_id)}
+              </span>
+              <span aria-hidden className="hidden sm:inline">
+                /
+              </span>
+            </>
+          )}
           <span className="truncate text-foreground/80" aria-current="page">
             {displayTitle}
           </span>
@@ -485,7 +528,12 @@ function TopicPage() {
             Grifos
           </button>
           {sourcePending.data ? (
-            <Button size="sm" variant="outline" disabled className="hidden h-9 text-sm sm:inline-flex">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled
+              className="hidden h-9 text-sm sm:inline-flex"
+            >
               <Loader2 className="size-4 animate-spin" aria-hidden /> Convertendo…
             </Button>
           ) : (
@@ -534,6 +582,15 @@ function TopicPage() {
               >
                 <Pencil className="size-4" aria-hidden /> Renomear
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setMoving(true)} className="gap-2">
+                <FolderInput className="size-4" aria-hidden /> Mover para pasta
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSourcesOpen(true)} className="gap-2">
+                <FileStack className="size-4" aria-hidden /> Fontes do tópico
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setExporting(true)} className="gap-2">
+                <FileDown className="size-4" aria-hidden /> Exportar PDF ou Word
+              </DropdownMenuItem>
               {hasSource && !sourcePending.data && (
                 <DropdownMenuItem onSelect={openOriginal} className="gap-2 sm:hidden">
                   <FileText className="size-4" aria-hidden /> Material original
@@ -569,7 +626,50 @@ function TopicPage() {
         ) : (
           <>Criado em {created}</>
         )}
+        {(extraSources.data?.length ?? 0) > 0 && (
+          <>
+            {" · "}
+            <button
+              type="button"
+              onClick={() => setSourcesOpen(true)}
+              className="text-foreground/80 underline decoration-border underline-offset-4 hover:decoration-foreground"
+            >
+              + {extraSources.data!.length} fonte{extraSources.data!.length > 1 ? "s" : ""}
+            </button>
+          </>
+        )}
       </p>
+
+      <SourcesDialog
+        open={sourcesOpen}
+        onOpenChange={setSourcesOpen}
+        topicId={id}
+        original={{ name: d.topic.source_name, kind: d.topic.source_kind }}
+        onApplied={async () => {
+          // Recarrega resumo, flashcards e questões, e remonta o editor com o resumo novo
+          await queryClient.invalidateQueries({ queryKey: ["topic", id] });
+          setSummaryVersion((v) => v + 1);
+        }}
+      />
+
+      <ExportDialog
+        open={exporting}
+        onOpenChange={setExporting}
+        topicId={id}
+        title={displayTitle}
+        summaryHtml={d.summaryHtml}
+        flashcards={d.flashcards}
+        mcq={d.mcq}
+        review={d.review}
+      />
+
+      <MoveTopicDialog
+        topic={moving ? { id, title: displayTitle, folder_id: d.topic.folder_id } : null}
+        onOpenChange={(o) => {
+          setMoving(o);
+          if (!o) void queryClient.invalidateQueries({ queryKey: ["topic", id] });
+        }}
+      />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
@@ -651,10 +751,21 @@ function TopicPage() {
                         }}
                         readActions={
                           hasContent ? (
-                            <RegenerateSummaryButton
-                              onConfirm={() => summaryGen.mutate()}
-                              generating={summaryGen.isPending}
-                            />
+                            <>
+                              <SummaryTools
+                                topicId={id}
+                                html={d.summaryHtml}
+                                onChanged={async () => {
+                                  // Recarrega o resumo salvo e remonta o editor com ele
+                                  await queryClient.invalidateQueries({ queryKey: ["topic", id] });
+                                  setSummaryVersion((v) => v + 1);
+                                }}
+                              />
+                              <RegenerateSummaryButton
+                                onConfirm={() => summaryGen.mutate()}
+                                generating={summaryGen.isPending}
+                              />
+                            </>
                           ) : null
                         }
                       />
@@ -680,7 +791,19 @@ function TopicPage() {
           />
         </TabsContent>
         <TabsContent value="esquema" className="mt-6 animate-fade-up">
-          {d.mindmap ? (
+          <Segmented
+            label="Formato do esquema"
+            value={esquemaView}
+            onChange={setEsquemaView}
+            options={[
+              { value: "ramos", label: "Ramos" },
+              { value: "fluxograma", label: "Fluxograma" },
+            ]}
+            className="mb-6"
+          />
+          {esquemaView === "fluxograma" ? (
+            <Flowchart topicId={id} />
+          ) : d.mindmap ? (
             <Esquema
               map={d.mindmap}
               topicId={id}
@@ -704,17 +827,39 @@ function TopicPage() {
         <TabsContent value="questoes" className="mt-6 animate-fade-up">
           <McqPractice questions={d.mcq} topicId={id} focus={practiceFocus} />
         </TabsContent>
+        <TabsContent value="discursivas" className="mt-6 animate-fade-up">
+          <EssayPractice topicId={id} />
+        </TabsContent>
         <TabsContent value="caso" className="mt-6 animate-fade-up">
           <ClinicalCase cases={d.cases} topicId={id} maskMode={maskMode} />
         </TabsContent>
         <TabsContent value="revisao" className="mt-6 animate-fade-up">
-          <p className="mb-5 text-sm text-muted-foreground">
-            Perguntas para refletir, sem gabarito. Tente responder com suas palavras, em voz alta ou
-            no papel.
+          <MnemonicsPanel topicId={id} />
+          <h2 className="border-b-[1.5px] border-foreground pb-2 text-[1.75rem] leading-none">
+            Perguntas para refletir
+          </h2>
+          <p className="mb-5 mt-3 text-sm text-muted-foreground">
+            Sem gabarito. Tente responder com suas palavras, em voz alta ou no papel.
           </p>
           <RevisaoTab topicId={id} review={d.review} maskMode={maskMode} />
         </TabsContent>
       </Tabs>
+
+      <TopicChat
+        topicId={id}
+        topicTitle={displayTitle}
+        onGoToSection={(title) => {
+          // Abre o Resumo e rola até a seção citada pelo tutor
+          setTab("resumo");
+          window.setTimeout(() => {
+            const heading = Array.from(
+              document.querySelectorAll<HTMLElement>(".resumo-editor .ProseMirror h2"),
+            ).find((el) => el.textContent?.replace(/\s+/g, " ").trim() === title);
+            const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            heading?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+          }, 150);
+        }}
+      />
     </main>
   );
 }

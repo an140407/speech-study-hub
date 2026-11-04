@@ -1,4 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, Minus, RotateCcw, X } from "lucide-react";
@@ -20,7 +21,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { delatex } from "@/lib/delatex";
+import { splitVignette } from "@/lib/vignette";
+import { QuestionStem } from "@/components/study/QuestionStem";
+import { AiWait } from "@/components/study/AiWait";
+import { aiErrorMessage, aiRetryLabel, withAiRetry } from "@/lib/ai-busy";
 import { cleanTitle, useTopicsList } from "@/lib/topics-index";
+import { useFolders } from "@/lib/folders";
+import { recordAttempts } from "@/lib/attempts";
 
 export const Route = createFileRoute("/_authenticated/prova")({
   head: () => ({
@@ -72,6 +79,7 @@ function ExamPage() {
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [current, setCurrent] = useState(0);
   const [building, setBuilding] = useState(false);
+  const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [seconds, setSeconds] = useState<number[]>([]);
   const [totalSeconds, setTotalSeconds] = useState(0);
   const generateMore = useServerFn(generateMoreMcq);
@@ -89,6 +97,7 @@ function ExamPage() {
   const topics = useTopicsList();
   const [confirmExit, setConfirmExit] = useState(false);
   const [onlyWrong, setOnlyWrong] = useState(false);
+  const queryClient = useQueryClient();
 
   async function startExam() {
     if (selected.length === 0) {
@@ -96,6 +105,7 @@ function ExamPage() {
       return;
     }
     setBuilding(true);
+    setBuildMsg(null);
     try {
       const fetchPool = async () => {
         const { data, error } = await supabase
@@ -135,10 +145,18 @@ function ExamPage() {
         }
 
         if (asks.length) {
-          toast.info(`Gerando ${needed - remaining} questões novas pra evitar repetir a prática…`);
+          const novas = needed - remaining;
+          const label = `Gerando ${novas} ${novas === 1 ? "questão nova" : "questões novas"} para não repetir a prática`;
+          setBuildMsg(label);
           for (const a of asks) {
             try {
-              await generateMore({ data: a });
+              await withAiRetry(
+                () => generateMore({ data: a }),
+                (s) => {
+                  setBuildMsg(aiRetryLabel(s));
+                  window.setTimeout(() => setBuildMsg(label), s * 1000);
+                },
+              );
             } catch (e) {
               console.error("Falha ao gerar questões extras pra prova", e);
             }
@@ -179,9 +197,10 @@ function ExamPage() {
       setCurrent(0);
       setStage("running");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao montar a prova.");
+      toast.error(aiErrorMessage(e, "Falha ao montar a prova."));
     } finally {
       setBuilding(false);
+      setBuildMsg(null);
     }
   }
 
@@ -193,30 +212,80 @@ function ExamPage() {
     setStage("result");
     setOnlyWrong(false);
     window.scrollTo(0, 0);
-    const { error } = await supabase.from("exam_attempts").insert({
-      question_ids: questions.map((q) => q.id),
-      answers,
-      score,
-      total: questions.length,
-      question_seconds: seconds,
-      total_seconds: totalSeconds,
-    });
+    const { data: exam, error } = await supabase
+      .from("exam_attempts")
+      .insert({
+        question_ids: questions.map((q) => q.id),
+        answers,
+        score,
+        total: questions.length,
+        question_seconds: seconds,
+        total_seconds: totalSeconds,
+      })
+      .select("id")
+      .single();
     if (error) console.error(error);
+    // Cada resposta dada entra no histórico (as erradas vão para o Caderno de erros).
+    await recordAttempts(
+      questions.flatMap((q, i) =>
+        answers[i] === null || answers[i] === undefined
+          ? []
+          : [
+              {
+                question_id: q.id,
+                chosen_index: answers[i]!,
+                source: "prova" as const,
+                exam_attempt_id: exam?.id ?? null,
+              },
+            ],
+      ),
+    );
+    void queryClient.invalidateQueries({ queryKey: ["mcq-attempts"] });
+    void queryClient.invalidateQueries({ queryKey: ["topics-progress"] });
   }
+
+  const examTopicIds = [...new Set(questions.map((q) => q.topic_id))];
+  const multiTopic = examTopicIds.length > 1;
+  const topicTitle = (id: string) =>
+    cleanTitle(topics.data?.find((t) => t.id === id)?.title ?? "Tópico");
+
+  const byTopic = (() => {
+    const map: Record<string, { total: number; ok: number }> = {};
+    questions.forEach((q, i) => {
+      const e = (map[q.topic_id] ??= { total: 0, ok: 0 });
+      e.total++;
+      if (answers[i] === q.correct_index) e.ok++;
+    });
+    return Object.entries(map).map(([id, v]) => ({
+      subtopic: topicTitle(id),
+      pct: Math.round((v.ok / v.total) * 100),
+      label: `${v.ok}/${v.total}`,
+    }));
+  })();
+
+  const wrongCount = questions.filter(
+    (q, i) => answers[i] !== null && answers[i] !== undefined && answers[i] !== q.correct_index,
+  ).length;
 
   const bySubtopic = (() => {
     const map: Record<string, { total: number; ok: number }> = {};
     questions.forEach((q, i) => {
-      const key = q.subtopic?.trim() || "Sem sub-tópico";
+      const ramo = q.subtopic?.trim() || "Sem sub-tópico";
+      // Com vários tópicos na prova, o ramo vem com o nome do tópico para não misturar.
+      const key = multiTopic ? `${topicTitle(q.topic_id)} › ${ramo}` : ramo;
       const e = (map[key] ??= { total: 0, ok: 0 });
       e.total++;
       if (answers[i] === q.correct_index) e.ok++;
     });
-    return Object.entries(map).map(([subtopic, v]) => ({
-      subtopic,
-      pct: Math.round((v.ok / v.total) * 100),
-      label: `${v.ok}/${v.total}`,
-    }));
+    return Object.entries(map).map(([key, v]) => {
+      const [group, ramo] = multiTopic ? key.split(" › ") : [undefined, key];
+      return {
+        subtopic: ramo ?? key,
+        group,
+        pct: Math.round((v.ok / v.total) * 100),
+        label: `${v.ok}/${v.total}`,
+      };
+    });
   })();
 
   const score = questions.reduce((acc, q, i) => acc + (answers[i] === q.correct_index ? 1 : 0), 0);
@@ -255,6 +324,26 @@ function ExamPage() {
   }, [stage, current, questions]);
 
   const allIds = (topics.data ?? []).map((t) => t.id);
+  const folders = useFolders();
+  // Atalho por pasta: um clique marca (ou desmarca) todos os tópicos de uma disciplina e das unidades dela.
+  const moduleGroups = (folders.data ?? [])
+    .filter((f) => !f.parent_id)
+    .map((m) => {
+      const inside = new Set([
+        m.id,
+        ...(folders.data ?? []).filter((f) => f.parent_id === m.id).map((f) => f.id),
+      ]);
+      const ids = (topics.data ?? [])
+        .filter((t) => t.folder_id && inside.has(t.folder_id))
+        .map((t) => t.id);
+      return {
+        id: m.id,
+        name: m.name,
+        ids,
+        all: ids.length > 0 && ids.every((id) => selected.includes(id)),
+      };
+    })
+    .filter((g) => g.ids.length > 0);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.includes(id));
 
   function leaveExam() {
@@ -312,7 +401,11 @@ function ExamPage() {
             {topics.isLoading ? (
               <div className="mt-4 space-y-3" aria-hidden>
                 {[70, 55, 80].map((w, i) => (
-                  <div key={i} className="h-5 rounded bg-black/[0.06]" style={{ width: `${w}%` }} />
+                  <div
+                    key={i}
+                    className="h-5 rounded bg-foreground/[0.06]"
+                    style={{ width: `${w}%` }}
+                  />
                 ))}
               </div>
             ) : !topics.data?.length ? (
@@ -320,31 +413,64 @@ function ExamPage() {
                 Você ainda não gerou nenhum tópico.
               </p>
             ) : (
-              <ul className="grid sm:grid-cols-2 sm:gap-x-8">
-                {topics.data.map((t) => {
-                  const checked = selected.includes(t.id);
-                  return (
-                    <li key={t.id} className="border-b border-border">
-                      <label className="flex min-h-12 cursor-pointer items-center gap-3 py-2.5 text-[0.95rem]">
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(v) =>
-                            setSelected((s) => (v ? [...s, t.id] : s.filter((id) => id !== t.id)))
-                          }
-                        />
-                        <span
-                          className={cn(
-                            "leading-snug",
-                            checked ? "text-foreground" : "text-foreground/80",
-                          )}
-                        >
-                          {cleanTitle(t.title)}
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                {moduleGroups.length > 0 && (
+                  <div
+                    role="group"
+                    aria-label="Selecionar por pasta"
+                    className="mt-4 flex flex-wrap items-center gap-1.5"
+                  >
+                    <span className="mr-1 text-sm text-muted-foreground">Por pasta:</span>
+                    {moduleGroups.map((g) => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        aria-pressed={g.all}
+                        onClick={() =>
+                          setSelected((s) =>
+                            g.all
+                              ? s.filter((id) => !g.ids.includes(id))
+                              : [...new Set([...s, ...g.ids])],
+                          )
+                        }
+                        className={cn(
+                          "h-8 rounded-md border px-3 text-[0.8125rem] transition-colors",
+                          g.all
+                            ? "border-foreground bg-foreground text-background"
+                            : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                        )}
+                      >
+                        {g.name} <span className="tnum opacity-70">({g.ids.length})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <ul className="grid sm:grid-cols-2 sm:gap-x-8">
+                  {topics.data.map((t) => {
+                    const checked = selected.includes(t.id);
+                    return (
+                      <li key={t.id} className="border-b border-border">
+                        <label className="flex min-h-12 cursor-pointer items-center gap-3 py-2.5 text-[0.95rem]">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(v) =>
+                              setSelected((s) => (v ? [...s, t.id] : s.filter((id) => id !== t.id)))
+                            }
+                          />
+                          <span
+                            className={cn(
+                              "leading-snug",
+                              checked ? "text-foreground" : "text-foreground/80",
+                            )}
+                          >
+                            {cleanTitle(t.title)}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
             <p className="mt-3 text-xs text-muted-foreground tnum">
               {selected.length} {selected.length === 1 ? "tópico escolhido" : "tópicos escolhidos"}
@@ -391,6 +517,14 @@ function ExamPage() {
             {building ? "Montando a prova…" : "Iniciar prova"}{" "}
             {!building && <ArrowRight className="size-4" aria-hidden />}
           </Button>
+          <AiWait
+            active={building}
+            label={buildMsg ?? "Separando as questões"}
+            className="mt-4 flex"
+          />
+          <p aria-live="polite" className="sr-only">
+            {building ? (buildMsg ?? "Montando a prova.") : ""}
+          </p>
         </div>
       )}
 
@@ -439,9 +573,7 @@ function ExamPage() {
           </div>
 
           <div key={current} className="animate-fade-up">
-            <h2 className="mt-8 text-[1.65rem] leading-[1.18] [text-wrap:pretty] sm:text-[1.9rem]">
-              {questions[current].question}
-            </h2>
+            <QuestionStem className="mt-8" question={questions[current].question} />
             <ol className="mt-6 space-y-2.5" aria-label="Alternativas">
               {questions[current].options.map((opt, i) => {
                 const chosen = answers[current] === i;
@@ -563,42 +695,48 @@ function ExamPage() {
             </Button>
           </section>
 
+          {wrongCount > 0 && (
+            <p className="-mt-4 text-sm text-muted-foreground">
+              {wrongCount === 1
+                ? "A questão que você errou foi"
+                : `As ${wrongCount} questões que você errou foram`}{" "}
+              para o{" "}
+              <Link
+                to="/erros"
+                className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+              >
+                Caderno de erros
+              </Link>
+              . Cada uma sai de lá depois de 2 acertos seguidos.
+            </p>
+          )}
+
+          {multiTopic && (
+            <section aria-labelledby="prova-topicos-resultado">
+              <h2 id="prova-topicos-resultado" className="text-[1.75rem] leading-none">
+                Desempenho por tópico
+              </h2>
+              <PerformanceBars rows={byTopic} />
+            </section>
+          )}
+
           {bySubtopic.length > 0 && (
             <section aria-labelledby="prova-ramos">
               <h2 id="prova-ramos" className="text-[1.75rem] leading-none">
                 Desempenho por ramo
               </h2>
-              <ul className="mt-4 space-y-3">
-                {bySubtopic
-                  .slice()
-                  .sort((a, b) => a.pct - b.pct)
-                  .map((r) => (
-                    <li
-                      key={r.subtopic}
-                      className="grid grid-cols-[minmax(0,12rem)_1fr_auto] items-center gap-4 text-sm"
-                    >
-                      <span className="truncate" title={r.subtopic}>
-                        {r.subtopic}
-                      </span>
-                      <span aria-hidden className="h-2 overflow-hidden rounded-full bg-border">
-                        <span
-                          className={cn(
-                            "block h-full rounded-full",
-                            r.pct >= 70
-                              ? "bg-tint-1-fg"
-                              : r.pct >= 40
-                                ? "bg-tint-4-fg"
-                                : "bg-tint-3-fg",
-                          )}
-                          style={{ width: `${Math.max(r.pct, 2)}%` }}
-                        />
-                      </span>
-                      <span className="w-20 text-right tnum">
-                        {r.label} · {r.pct}%
-                      </span>
-                    </li>
-                  ))}
-              </ul>
+              {multiTopic ? (
+                [...new Set(bySubtopic.map((r) => r.group ?? ""))].map((g) => (
+                  <div key={g} className="mt-5">
+                    <p className="font-sans text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      {g}
+                    </p>
+                    <PerformanceBars rows={bySubtopic.filter((r) => (r.group ?? "") === g)} />
+                  </div>
+                ))
+              ) : (
+                <PerformanceBars rows={bySubtopic} />
+              )}
               <p className="mt-3 text-xs text-muted-foreground">
                 Os ramos com menos acertos aparecem primeiro.
               </p>
@@ -650,10 +788,10 @@ function ExamPage() {
                         className={cn(
                           "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
                           ok
-                            ? "bg-tint-1-fg text-white"
+                            ? "bg-tint-1-fg text-background"
                             : blank
-                              ? "bg-muted-foreground text-white"
-                              : "bg-tint-3-fg text-white",
+                              ? "bg-muted-foreground text-background"
+                              : "bg-tint-3-fg text-background",
                         )}
                         aria-hidden
                       >
@@ -665,12 +803,22 @@ function ExamPage() {
                           <X className="size-3.5" strokeWidth={3} />
                         )}
                       </span>
-                      <p className="flex-1 font-medium leading-relaxed">
-                        <span className="sr-only">
-                          {ok ? "Certa. " : blank ? "Não respondida. " : "Errada. "}
-                        </span>
-                        {i + 1}. {q.question}
-                      </p>
+                      <div className="flex-1">
+                        <p className="font-medium leading-relaxed">
+                          <span className="sr-only">
+                            {ok ? "Certa. " : blank ? "Não respondida. " : "Errada. "}
+                          </span>
+                          {i + 1}. {splitVignette(q.question).stem}
+                        </p>
+                        {splitVignette(q.question).vignette && (
+                          <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                            <span className="mr-1.5 font-sans text-[0.6875rem] font-medium uppercase tracking-[0.12em]">
+                              Caso
+                            </span>
+                            {splitVignette(q.question).vignette}
+                          </p>
+                        )}
+                      </div>
                       <span
                         className={cn(
                           "shrink-0 font-mono text-xs text-muted-foreground tnum",
@@ -742,5 +890,38 @@ function ExamPage() {
         </AlertDialogContent>
       </AlertDialog>
     </main>
+  );
+}
+
+/** Barras de acerto (tópico ou ramo), do pior para o melhor. A cor repete o número ao lado. */
+function PerformanceBars({ rows }: { rows: { subtopic: string; pct: number; label: string }[] }) {
+  return (
+    <ul className="mt-3 space-y-3">
+      {rows
+        .slice()
+        .sort((a, b) => a.pct - b.pct)
+        .map((r) => (
+          <li
+            key={r.subtopic}
+            className="grid grid-cols-[minmax(0,14rem)_1fr_auto] items-center gap-4 text-sm"
+          >
+            <span className="truncate" title={r.subtopic}>
+              {r.subtopic}
+            </span>
+            <span aria-hidden className="h-2 overflow-hidden rounded-full bg-border">
+              <span
+                className={cn(
+                  "block h-full rounded-full",
+                  r.pct >= 70 ? "bg-tint-1-fg" : r.pct >= 40 ? "bg-tint-4-fg" : "bg-tint-3-fg",
+                )}
+                style={{ width: `${Math.max(r.pct, 2)}%` }}
+              />
+            </span>
+            <span className="w-24 text-right tnum">
+              {r.label} · {r.pct}%
+            </span>
+          </li>
+        ))}
+    </ul>
   );
 }

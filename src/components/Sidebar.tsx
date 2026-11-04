@@ -1,11 +1,24 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { GraduationCap, LogOut, NotebookPen, Plus, Search } from "lucide-react";
+import { BookA, BookX, ChartNoAxesColumn, ChevronRight, Ellipsis, FolderPlus, GraduationCap, LogOut, NotebookPen, Plus, Search } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { BrandMark, Wordmark } from "@/components/BrandMark";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { DeleteFolderDialog, FolderNameDialog } from "@/components/folders/FolderDialogs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { buildFolderTree, useFolderActions, useFolders, type Folder } from "@/lib/folders";
+import type { TopicListItem } from "@/lib/topics-index";
+import { computeMistakes, useAttempts } from "@/lib/attempts";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cleanTitle, progressPct, useTopicsList, useTopicsProgress } from "@/lib/topics-index";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 /**
  * Casca do app logado (proposta Caderno):
@@ -105,7 +118,22 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
   const navigate = useNavigate();
   const topics = useTopicsList();
   const progress = useTopicsProgress();
+  const folders = useFolders();
+  const attempts = useAttempts();
+  const pendingMistakes = useMemo(() => computeMistakes(attempts.data ?? []).pending.length, [attempts.data]);
+  const { create, rename, moveTopic } = useFolderActions();
+  // Arrastar tópico para uma pasta (no computador). No celular/teclado: "⋯ → Mover para pasta".
+  const [dragging, setDragging] = useState(false);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const expandTimer = useRef<number | null>(null);
   const [filter, setFilter] = useState("");
+  const [nameDialog, setNameDialog] = useState<
+    { mode: "modulo" } | { mode: "problema"; parent: Folder } | { mode: "renomear"; folder: Folder } | null
+  >(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ folder: Folder; topics: number; problems: number } | null>(
+    null,
+  );
+  const collapsed = useCollapsedFolders();
   const uid = useId();
   const headingId = `${uid}-indice`;
   const filterId = `${uid}-filtro`;
@@ -123,6 +151,181 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
             .includes(q),
       );
   }, [topics.data, filter]);
+
+  const tree = useMemo(
+    () => buildFolderTree(folders.data ?? [], topics.data ?? []),
+    [folders.data, topics.data],
+  );
+  const hasFolders = (folders.data?.length ?? 0) > 0;
+  const activeTopicId = pathname.startsWith("/topico/") ? pathname.slice("/topico/".length) : null;
+  const activeFolderId = topics.data?.find((t) => t.id === activeTopicId)?.folder_id ?? null;
+  const activeParentId = folders.data?.find((f) => f.id === activeFolderId)?.parent_id ?? null;
+  const isOpen = (id: string) => !collapsed.has(id);
+
+  // Enquanto arrasta, soltar fora de uma pasta não abre o link do tópico numa aba nova.
+  useEffect(() => {
+    if (!dragging) return;
+    const block = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes(TOPIC_MIME)) e.preventDefault();
+    };
+    window.addEventListener("dragover", block);
+    window.addEventListener("drop", block);
+    return () => {
+      window.removeEventListener("dragover", block);
+      window.removeEventListener("drop", block);
+    };
+  }, [dragging]);
+
+  function stopDrag() {
+    setDragging(false);
+    setDragOver(null);
+    if (expandTimer.current) window.clearTimeout(expandTimer.current);
+    expandTimer.current = null;
+  }
+
+  /** Torna uma área (pasta ou "Sem pasta") um destino para soltar tópicos. */
+  function dropTarget(key: string, folderId: string | null, label: string) {
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (!e.dataTransfer.types.includes(TOPIC_MIME)) return;
+        e.preventDefault();
+        e.stopPropagation(); // a pasta mais interna (unidade) ganha da de fora (disciplina)
+        e.dataTransfer.dropEffect = "move";
+        if (dragOver !== key) {
+          setDragOver(key);
+          if (expandTimer.current) window.clearTimeout(expandTimer.current);
+          expandTimer.current = null;
+          // Pasta fechada abre sozinha se o tópico ficar parado em cima dela.
+          if (folderId && collapsed.has(folderId)) {
+            expandTimer.current = window.setTimeout(() => collapsed.toggle(folderId), 650);
+          }
+        }
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDragOver((k) => (k === key ? null : k));
+      },
+      onDrop: async (e: React.DragEvent) => {
+        if (!e.dataTransfer.types.includes(TOPIC_MIME)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const topicId = e.dataTransfer.getData(TOPIC_MIME);
+        stopDrag();
+        const topic = topics.data?.find((t) => t.id === topicId);
+        if (!topic || topic.folder_id === folderId) return;
+        try {
+          await moveTopic(topicId, folderId);
+          toast.success(folderId ? `Movido para “${label}”.` : "Movido para “Sem pasta”.");
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Não deu para mover o tópico.");
+        }
+      },
+    };
+  }
+  // Ao abrir um tópico, a pasta dele (e a disciplina acima) se abrem para ele aparecer no índice.
+  const { expand } = collapsed;
+  useEffect(() => {
+    expand([activeFolderId, activeParentId]);
+  }, [activeFolderId, activeParentId, expand]);
+
+  function renderTopic(t: TopicListItem & { label?: string }) {
+    const label = t.label ?? cleanTitle(t.title);
+    const active = pathname === `/topico/${t.id}`;
+    const pct = progressPct(progress.data?.byTopic[t.id]);
+    return (
+      <li key={t.id}>
+        <Link
+          to="/topico/$id"
+          params={{ id: t.id }}
+          title={label}
+          aria-current={active ? "page" : undefined}
+          draggable={hasFolders}
+          onDragStart={(e) => {
+            if (!hasFolders) return;
+            e.dataTransfer.setData(TOPIC_MIME, t.id);
+            e.dataTransfer.effectAllowed = "move";
+            setDragging(true);
+          }}
+          onDragEnd={stopDrag}
+          className={cn(
+            "flex min-h-9 items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+            dragging && "cursor-grabbing",
+            active
+              ? "bg-sidebar-accent text-foreground shadow-[0_0_0_1px_var(--color-sidebar-border)]"
+              : "text-foreground/80 hover:bg-sidebar-accent/70 hover:text-foreground",
+          )}
+        >
+          <span className="truncate">{label}</span>
+          <span className="shrink-0 text-xs text-muted-foreground tnum">{pct}%</span>
+        </Link>
+      </li>
+    );
+  }
+
+  function folderRow(folder: Folder, count: number, problems: number, isModule: boolean) {
+    const open = isOpen(folder.id);
+    return (
+      <div
+        {...dropTarget(folder.id, folder.id, folder.name)}
+        className={cn(
+          "group/pasta flex items-center rounded-md transition-[background-color,box-shadow] hover:bg-sidebar-accent/70",
+          dragOver === folder.id && "bg-sidebar-accent shadow-[0_0_0_1.5px_var(--color-ring)]",
+        )}
+      >
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => collapsed.toggle(folder.id)}
+          className={cn(
+            "flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-1.5 text-left",
+            isModule ? "text-[0.8125rem] font-medium text-foreground" : "text-sm text-foreground/85",
+          )}
+        >
+          <ChevronRight
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out",
+              open && "rotate-90",
+            )}
+            aria-hidden
+          />
+          <span className="truncate">{folder.name}</span>
+          <span className="ml-auto shrink-0 pl-2 text-xs font-normal text-muted-foreground tnum">
+            <span className="sr-only">, </span>
+            {count}
+            <span className="sr-only"> {count === 1 ? "tópico" : "tópicos"}</span>
+          </span>
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`Ações da pasta ${folder.name}`}
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[opacity,color,background-color] hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 data-[state=open]:opacity-100 lg:opacity-0 lg:group-hover/pasta:opacity-100"
+            >
+              <Ellipsis className="size-4" aria-hidden />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            {isModule && (
+              <DropdownMenuItem onSelect={() => setNameDialog({ mode: "problema", parent: folder })}>
+                Nova unidade
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => setNameDialog({ mode: "renomear", folder })}>
+              Renomear
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => setDeleteTarget({ folder, topics: count, problems })}
+              className="text-destructive focus:text-destructive"
+            >
+              Excluir
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  }
 
   const name = (user?.user_metadata?.["full_name"] as string | undefined) ?? user?.email ?? "";
   const firstName = name.split(/[\s@]/)[0] ?? "";
@@ -192,6 +395,37 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
           <GraduationCap className="size-[18px]" aria-hidden />
           Modo Prova
         </Link>
+        <Link
+          to="/erros"
+          className={navItem(pathname.startsWith("/erros"))}
+          aria-current={pathname.startsWith("/erros") ? "page" : undefined}
+        >
+          <BookX className="size-[18px]" aria-hidden />
+          Caderno de erros
+          {pendingMistakes > 0 && (
+            <span className="ml-auto rounded-full bg-tint-3 px-2 py-0.5 text-xs font-medium text-tint-3-fg tnum">
+              <span className="sr-only">, </span>
+              {pendingMistakes}
+              <span className="sr-only"> para revisar</span>
+            </span>
+          )}
+        </Link>
+        <Link
+          to="/glossario"
+          className={navItem(pathname.startsWith("/glossario"))}
+          aria-current={pathname.startsWith("/glossario") ? "page" : undefined}
+        >
+          <BookA className="size-[18px]" aria-hidden />
+          Glossário
+        </Link>
+        <Link
+          to="/estatisticas"
+          className={navItem(pathname.startsWith("/estatisticas"))}
+          aria-current={pathname.startsWith("/estatisticas") ? "page" : undefined}
+        >
+          <ChartNoAxesColumn className="size-[18px]" aria-hidden />
+          Desempenho
+        </Link>
       </nav>
 
       <section aria-labelledby={headingId} className="flex min-h-0 flex-1 flex-col">
@@ -202,9 +436,20 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
           >
             Índice
           </h2>
-          {!!topics.data?.length && (
-            <span className="text-xs text-muted-foreground tnum">{topics.data.length}</span>
-          )}
+          <div className="flex items-center gap-1">
+            {!!topics.data?.length && (
+              <span className="text-xs text-muted-foreground tnum">{topics.data.length}</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setNameDialog({ mode: "modulo" })}
+              aria-label="Nova disciplina"
+              title="Nova disciplina"
+              className="-mr-1.5 flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <FolderPlus className="size-4" aria-hidden />
+            </button>
+          </div>
         </div>
 
         {(topics.data?.length ?? 0) > 6 && (
@@ -221,7 +466,7 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filtrar tópicos…"
-              className="h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-2 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:bg-sidebar-accent focus:shadow-[0_0_0_3px_rgb(35_70_168/18%)]"
+              className="h-9 w-full rounded-md border border-sidebar-border bg-sidebar-accent/60 pl-8 pr-2 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground focus:border-ring focus:bg-sidebar-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-ring)_18%,transparent)]"
             />
           </div>
         )}
@@ -231,7 +476,7 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
             <ul className="space-y-1" aria-hidden>
               {[70, 85, 60, 78].map((w, i) => (
                 <li key={i} className="h-8 rounded-md px-2.5 py-2">
-                  <div className="h-3.5 rounded bg-black/[0.06]" style={{ width: `${w}%` }} />
+                  <div className="h-3.5 rounded bg-foreground/[0.06]" style={{ width: `${w}%` }} />
                 </li>
               ))}
             </ul>
@@ -239,35 +484,104 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
             <p className="px-2.5 py-2 text-sm text-muted-foreground">
               {filter ? "Nenhum tópico com esse nome." : "Seus tópicos aparecem aqui."}
             </p>
+          ) : filter || !hasFolders ? (
+            <ul className="space-y-0.5">{list.map((t) => renderTopic(t))}</ul>
           ) : (
-            <ul className="space-y-0.5">
-              {list.map((t) => {
-                const active = pathname === `/topico/${t.id}`;
-                const pct = progressPct(progress.data?.byTopic[t.id]);
-                return (
-                  <li key={t.id}>
-                    <Link
-                      to="/topico/$id"
-                      params={{ id: t.id }}
-                      title={t.label}
-                      aria-current={active ? "page" : undefined}
-                      className={cn(
-                        "flex min-h-9 items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                        active
-                          ? "bg-sidebar-accent text-foreground shadow-[0_0_0_1px_var(--color-sidebar-border)]"
-                          : "text-foreground/80 hover:bg-sidebar-accent/70 hover:text-foreground",
-                      )}
+            <div className="space-y-1">
+              {tree.modules.map((m) => (
+                <div key={m.folder.id}>
+                  {folderRow(m.folder, m.count, m.problems.length, true)}
+                  {isOpen(m.folder.id) && (
+                    <div
+                      {...dropTarget(m.folder.id, m.folder.id, m.folder.name)}
+                      className="ml-[0.8125rem] space-y-0.5 border-l border-sidebar-border pl-1.5"
                     >
-                      <span className="truncate">{t.label}</span>
-                      <span className="shrink-0 text-xs text-muted-foreground tnum">{pct}%</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+                      {m.problems.map((p) => (
+                        <div key={p.folder.id}>
+                          {folderRow(p.folder, p.topics.length, 0, false)}
+                          {isOpen(p.folder.id) && (
+                            <ul
+                              {...dropTarget(p.folder.id, p.folder.id, p.folder.name)}
+                              className="ml-[0.8125rem] space-y-0.5 border-l border-sidebar-border pl-1.5"
+                            >
+                              {p.topics.length ? (
+                                p.topics.map((t) => renderTopic(t))
+                              ) : (
+                                <li className="px-2.5 py-1.5 text-xs text-muted-foreground">Nenhum tópico</li>
+                              )}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
+                      {!!m.topics.length && <ul className="space-y-0.5">{m.topics.map((t) => renderTopic(t))}</ul>}
+                      {!m.problems.length && !m.topics.length && (
+                        <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+                          Vazio. Use “⋯ → Nova unidade” ou mova um tópico para cá.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {(!!tree.loose.length || dragging) && (
+                <div
+                  {...dropTarget("sem-pasta", null, "Sem pasta")}
+                  className={cn(
+                    "mt-2 rounded-md pt-2 transition-[background-color,box-shadow]",
+                    dragOver === "sem-pasta" && "bg-sidebar-accent shadow-[0_0_0_1.5px_var(--color-ring)]",
+                  )}
+                >
+                  <p className="px-2.5 pb-1 font-sans text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    Sem pasta
+                  </p>
+                  {tree.loose.length ? (
+                    <ul className="space-y-0.5">{tree.loose.map((t) => renderTopic(t))}</ul>
+                  ) : (
+                    <p className="mx-2.5 mb-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-2 text-xs text-muted-foreground">
+                      Solte aqui para tirar da pasta
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </section>
+
+      <FolderNameDialog
+        open={!!nameDialog}
+        onOpenChange={(o) => !o && setNameDialog(null)}
+        title={
+          nameDialog?.mode === "renomear"
+            ? "Renomear pasta"
+            : nameDialog?.mode === "problema"
+              ? "Nova unidade"
+              : "Nova disciplina"
+        }
+        description={
+          nameDialog?.mode === "problema"
+            ? `Dentro de “${nameDialog.parent.name}”.`
+            : nameDialog?.mode === "renomear"
+              ? "O nome aparece no índice e no Modo Prova."
+              : "Uma disciplina agrupa as unidades e os tópicos estudados nela."
+        }
+        initialName={nameDialog?.mode === "renomear" ? nameDialog.folder.name : ""}
+        placeholder={nameDialog?.mode === "problema" ? "Ex.: Unidade 2" : "Ex.: Audiologia Clínica"}
+        submitLabel={nameDialog?.mode === "renomear" ? "Salvar" : "Criar"}
+        onSubmit={async (value) => {
+          if (!nameDialog) return;
+          if (nameDialog.mode === "renomear") await rename(nameDialog.folder.id, value);
+          else await create(value, nameDialog.mode === "problema" ? nameDialog.parent.id : null);
+        }}
+      />
+      <DeleteFolderDialog
+        folder={deleteTarget?.folder ?? null}
+        topicCount={deleteTarget?.topics ?? 0}
+        problemCount={deleteTarget?.problems ?? 0}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      />
+
+      <ThemeSwitcher className="border-t border-sidebar-border pt-3" />
 
       <div className="flex items-center gap-2.5 border-t border-sidebar-border pt-3">
         <span
@@ -291,4 +605,42 @@ function SidebarContent({ pathname, onNewTopic }: { pathname: string; onNewTopic
       </div>
     </div>
   );
+}
+
+const COLLAPSED_KEY = "fonolab:pastas-recolhidas";
+const TOPIC_MIME = "application/x-fonolab-topic";
+
+/** Pastas recolhidas ficam lembradas neste navegador (só conforto visual; nada vai para o banco). */
+function useCollapsedFolders() {
+  const [ids, setIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as unknown;
+      if (Array.isArray(saved)) setIds(new Set(saved.filter((x): x is string => typeof x === "string")));
+    } catch {
+      // sem armazenamento: tudo começa aberto
+    }
+  }, []);
+  const update = useCallback((change: (next: Set<string>) => void) => {
+    setIds((prev) => {
+      const next = new Set(prev);
+      change(next);
+      if (next.size === prev.size && [...next].every((id) => prev.has(id))) return prev;
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // sem armazenamento: vale só nesta visita
+      }
+      return next;
+    });
+  }, []);
+  const expand = useCallback(
+    (list: (string | null)[]) => update((next) => list.forEach((id) => id && next.delete(id))),
+    [update],
+  );
+  return {
+    has: (id: string) => ids.has(id),
+    toggle: (id: string) => update((next) => (next.has(id) ? next.delete(id) : next.add(id))),
+    expand,
+  };
 }

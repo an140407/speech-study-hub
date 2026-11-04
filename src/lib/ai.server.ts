@@ -1,3 +1,8 @@
+import { aiBusyError, isBusyStatus } from "./ai-busy";
+import { MODEL_FALLBACK, MODEL_MAIN, shouldFallback } from "./ai-config";
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Pequeno utilitário de IA reaproveitando o mesmo padrão de gemini.server.ts:
  * usa a API do Gemini direto quando GEMINI_API_KEY existe, senão o gateway do Lovable.
@@ -16,27 +21,50 @@ function extractJson(raw: string): string {
 async function callModel(system: string, user: string): Promise<string> {
   const geminiKey = process.env["GEMINI_API_KEY"];
   if (geminiKey) {
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: user }] }],
-          generationConfig: { responseMimeType: "application/json", temperature: 0.8, maxOutputTokens: 50000 },
-        }),
-      },
-    );
-    if (!res.ok) {
-      console.error("Gemini error", res.status, await res.text());
-      throw new Error(`Erro na API do Gemini (${res.status}).`);
+    // Cada modelo tem 2 tentativas quando o Google responde "congestionado" (429/5xx);
+    // depois passa para o modelo reserva. Só desiste se os dois continuarem congestionados.
+    let lastStatus = 0;
+    for (const model of [MODEL_MAIN, MODEL_FALLBACK]) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) await sleep(1500 + Math.random() * 1000);
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: system }] },
+              contents: [{ role: "user", parts: [{ text: user }] }],
+              generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.8,
+                maxOutputTokens: 50000,
+              },
+            }),
+          },
+        );
+        if (!res.ok) {
+          console.error("Gemini error", model, attempt + 1, res.status, await res.text());
+          lastStatus = res.status;
+          if (isBusyStatus(res.status)) continue;
+          if (model === MODEL_MAIN && shouldFallback(res.status)) break;
+          throw new Error(`Erro na API do Gemini (${res.status}).`);
+        }
+        const json = (await res.json()) as {
+          candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+        };
+        if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+          throw new Error(
+            "A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.",
+          );
+        }
+        return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      }
     }
-    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
-    if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
-      throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.");
-    }
-    return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    // Marcação de "congestionado": a tela mostra uma mensagem clara e pode tentar de novo sozinha
+    throw isBusyStatus(lastStatus)
+      ? aiBusyError(lastStatus)
+      : new Error(`Erro na API do Gemini (${lastStatus}).`);
   }
 
   const lovableKey = process.env["LOVABLE_API_KEY"];
@@ -60,13 +88,21 @@ async function callModel(system: string, user: string): Promise<string> {
   });
   if (!res.ok) {
     console.error("Lovable AI error", res.status, await res.text());
-    if (res.status === 429) throw new Error("Muitas solicitações. Aguarde um instante e tente de novo.");
-    if (res.status === 402) throw new Error("Créditos de IA esgotados. Adicione créditos no workspace.");
-    throw new Error(`Erro na IA (${res.status}).`);
+    if (res.status === 429)
+      throw new Error("Muitas solicitações. Aguarde um instante e tente de novo.");
+    if (res.status === 402)
+      throw new Error("Créditos de IA esgotados. Adicione créditos no workspace.");
+    throw isBusyStatus(res.status)
+      ? aiBusyError(res.status)
+      : new Error(`Erro na IA (${res.status}).`);
   }
-  const json = (await res.json()) as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+  const json = (await res.json()) as {
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
+  };
   if (json.choices?.[0]?.finish_reason === "length") {
-    throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.");
+    throw new Error(
+      "A resposta da IA foi cortada por ficar grande demais. Tente pedir uma quantidade menor.",
+    );
   }
   return json.choices?.[0]?.message?.content ?? "";
 }

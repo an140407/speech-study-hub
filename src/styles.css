@@ -65,6 +65,7 @@
   --color-ink: var(--ink);
   --color-pen: var(--pen);
   --color-hl: var(--hl);
+  --color-hl-foreground: var(--hl-foreground);
   --color-tint-1: var(--tint-1);
   --color-tint-1-fg: var(--tint-1-fg);
   --color-tint-2: var(--tint-2);
@@ -80,9 +81,10 @@
   --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* Sombras quase invisíveis: no Caderno quem separa as coisas é a linha, não a sombra */
-  --shadow-soft: 0 1px 2px rgb(26 25 23 / 4%);
-  --shadow-lift: 0 1px 2px rgb(26 25 23 / 5%), 0 10px 28px -18px rgb(26 25 23 / 22%);
+  /* Sombras quase invisíveis: no Caderno quem separa as coisas é a linha, não a sombra.
+     Os valores ficam em :root/.dark para o tema noturno usar um preto mais denso. */
+  --shadow-soft: var(--elev-soft);
+  --shadow-lift: var(--elev-lift);
 
   --animate-fade-up: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
   @keyframes fade-up {
@@ -100,6 +102,10 @@
   --ink: #1a1917;
   --pen: #2346a8;
   --hl: #ffe27a;
+  --hl-foreground: var(--ink);
+
+  --elev-soft: 0 1px 2px rgb(26 25 23 / 4%);
+  --elev-lift: 0 1px 2px rgb(26 25 23 / 5%), 0 10px 28px -18px rgb(26 25 23 / 22%);
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -157,13 +163,18 @@
   --sidebar-ring: var(--pen);
 }
 
-/* Tema escuro (ainda não tem botão para ligar; fica pronto para o futuro) */
+/* Caderno noturno: papel escuro, tinta clara. O grifo continua amarelo e o texto
+   grifado fica escuro (contraste 11:1). Ligado pelo seletor de tema da barra lateral. */
 .dark {
   color-scheme: dark;
   --paper: #161513;
   --ink: #ece8e1;
   --pen: #93a8f0;
   --hl: #e8c75a;
+  --hl-foreground: #161513;
+
+  --elev-soft: 0 1px 2px rgb(0 0 0 / 30%);
+  --elev-lift: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 28px -16px rgb(0 0 0 / 60%);
 
   --background: var(--paper);
   --foreground: var(--ink);
@@ -258,7 +269,7 @@
   }
 
   ::selection {
-    background-color: rgb(35 70 168 / 16%);
+    background-color: color-mix(in srgb, var(--pen) 22%, transparent);
   }
 
   /* Foco sempre visível em azul-caneta. :where() não tem especificidade,
@@ -295,6 +306,12 @@
   box-shadow: var(--shadow-soft);
 }
 
+/* Troca de tema instantânea: sem transições misturando as cores antigas e novas */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
+}
+
 @utility tnum {
   font-variant-numeric: tabular-nums;
 }
@@ -302,7 +319,7 @@
 /* Traço de marca-texto: o motivo visual do Caderno */
 @utility grifo {
   background-color: var(--color-hl);
-  color: var(--color-ink);
+  color: var(--color-hl-foreground);
   border-radius: 0.2em 0.4em 0.3em 0.5em;
   padding: 0 0.08em;
   box-decoration-break: clone;
@@ -356,7 +373,7 @@
 /* Grifo de texto (modo máscara) */
 mark.fono-highlight {
   background-color: var(--color-hl);
-  color: inherit;
+  color: var(--color-hl-foreground);
   border-radius: 0.2em 0.4em 0.3em 0.5em;
   padding: 0.05em 0.04em;
   box-decoration-break: clone;
@@ -384,7 +401,7 @@ mark.fono-highlight {
 }
 .resumo-editor.editing .ProseMirror:focus-visible {
   border-color: var(--ring);
-  box-shadow: 0 0 0 3px rgb(35 70 168 / 14%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 18%, transparent);
 }
 /* Esconde a barra de rolagem em telas de tablet/celular (rolagem continua funcionando) */
 @media (max-width: 1024px) {
@@ -429,7 +446,11 @@ mark.fono-highlight {
 
 /* Esquema: item coberto (riscos de "linha de caderno") */
 .esquema-cover {
-  background: repeating-linear-gradient(90deg, rgb(26 25 23 / 20%) 0 6px, transparent 6px 10px);
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--ink) 20%, transparent) 0 6px,
+    transparent 6px 10px
+  );
 }
 
 /* Esquema: versão para imprimir / salvar em PDF (montada no <body> só na hora de imprimir) */
@@ -504,5 +525,18 @@ mark.fono-highlight {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* Indicadores de carregamento continuam se mexendo (mais devagar) mesmo com "reduzir
+   movimento" ligado no sistema: eles avisam que algo está acontecendo, não são enfeite. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .animate-pulse {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
   }
 }

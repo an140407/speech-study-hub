@@ -243,7 +243,7 @@ export function Esquema({
 
               {!cover && (
                 <div className="mt-3">
-                  <div className="h-1 overflow-hidden rounded-full bg-black/10" aria-hidden>
+                  <div className="h-1 overflow-hidden rounded-full bg-foreground/10" aria-hidden>
                     <div
                       className={cn("h-full rounded-full", t.dot)}
                       style={{ width: `${s.pct}%` }}
@@ -261,7 +261,7 @@ export function Esquema({
                 {b.children.map((child, ci) => {
                   const k = keyOf(bi, ci);
                   const st = items[k];
-                  const rowClass = "border-t border-black/[0.07] first:border-t-0";
+                  const rowClass = "border-t border-foreground/[0.07] first:border-t-0";
                   if (!cover) {
                     return (
                       <li

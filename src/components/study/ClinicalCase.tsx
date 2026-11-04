@@ -4,7 +4,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AiWait } from "@/components/study/AiWait";
 import { cn } from "@/lib/utils";
+import { aiErrorMessage, aiRetryLabel, withAiRetry } from "@/lib/ai-busy";
 import type { ClinicalCaseRow } from "@/lib/study-types";
 import { HighlightableBlock, useHighlights } from "@/lib/highlight";
 import {
@@ -12,6 +14,16 @@ import {
   explainGuidingQuestion,
   generateClinicalCase,
 } from "@/lib/study-extra.functions";
+
+/**
+ * Cenário em seções: põe em negrito o rótulo do começo de cada linha
+ * ("Identificação:", "Avaliação fonoaudiológica:"...). O negrito usa a marcação **...**, que o
+ * renderizador de grifos já entende e não conta nas posições, então grifos antigos não se mexem.
+ */
+function boldCaseLabels(text: string): string {
+  // Rótulo = só letras, espaços, parênteses e barras (sem números), para não pegar "OD 45 dB (4 kHz): ...".
+  return text.replace(/^([A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-Za-zÀ-ÿ ()/–-]{2,40}):/gm, "**$1:**");
+}
 
 const MAX_CASES = 5;
 
@@ -125,7 +137,7 @@ function CaseView({
           as="p"
           className="mt-3 whitespace-pre-line text-[1.0625rem] leading-relaxed"
           blockIndex={0}
-          text={data.scenario}
+          text={boldCaseLabels(data.scenario)}
           ranges={rangesFor(0)}
           onSelect={onSelect}
           onRemove={onRemove}
@@ -232,20 +244,25 @@ function GuidingAnswer({
   const [show, setShow] = useState(false);
   const [text, setText] = useState(aiExplanation);
   const [loading, setLoading] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const explain = useServerFn(explainGuidingQuestion);
   const queryClient = useQueryClient();
 
   async function run() {
     setLoading(true);
     try {
-      const res = await explain({ data: { case_id: caseId, index } });
+      const res = await withAiRetry(
+        () => explain({ data: { case_id: caseId, index } }),
+        (s) => setRetryMsg(aiRetryLabel(s)),
+      );
       setText(res.ai_explanation);
       setShow(true);
       queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao gerar a explicação.");
+      toast.error(aiErrorMessage(e, "Falha ao gerar a explicação."));
     } finally {
       setLoading(false);
+      setRetryMsg(null);
     }
   }
 
@@ -267,13 +284,14 @@ function GuidingAnswer({
           {show ? "Esconder resposta" : "Ver resposta"}
         </Button>
         <Button variant="ghost" size="sm" className="h-9" onClick={run} disabled={loading}>
-          {loading ? (
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <Sparkles className="size-4" aria-hidden />
-          )}
-          {loading ? "Explicando…" : text ? "Explicar de novo com IA" : "Explicar com IA"}
+          {/* Enquanto espera, o círculo e o tempo ficam só na linha ao lado */}
+          <Sparkles className="size-4" aria-hidden />
+          {text ? "Explicar de novo com IA" : "Explicar com IA"}
         </Button>
+        <AiWait active={loading} label={retryMsg ?? "Explicando a resposta"} />
+        <span aria-live="polite" className="sr-only">
+          {loading ? (retryMsg ?? "Explicando a resposta.") : ""}
+        </span>
       </div>
       {show && (
         <div className="mt-3 animate-fade-up space-y-2">
@@ -293,40 +311,53 @@ function GuidingAnswer({
 
 function GenerateCaseButton({ topicId, total }: { topicId: string; total: number }) {
   const [loading, setLoading] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const generate = useServerFn(generateClinicalCase);
   const queryClient = useQueryClient();
 
   async function run() {
     setLoading(true);
     try {
-      await generate({ data: { topic_id: topicId } });
+      await withAiRetry(
+        () => generate({ data: { topic_id: topicId } }),
+        (s) => setRetryMsg(aiRetryLabel(s)),
+      );
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
-      toast.success("Novo caso clínico gerado!");
+      toast.success("Novo caso clínico gerado.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao gerar o caso.");
+      toast.error(aiErrorMessage(e, "Falha ao gerar o caso."));
     } finally {
       setLoading(false);
+      setRetryMsg(null);
     }
   }
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      className="h-9"
-      onClick={run}
-      disabled={loading || total >= MAX_CASES}
-    >
-      {loading ? (
-        <Loader2 className="size-4 animate-spin" aria-hidden />
-      ) : (
-        <Sparkles className="size-4" aria-hidden />
-      )}
-      {loading
-        ? "Gerando…"
-        : total >= MAX_CASES
-          ? `Limite de ${MAX_CASES} casos`
-          : "Gerar mais um caso"}
-    </Button>
+    <div className="flex flex-col items-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-9"
+        onClick={run}
+        disabled={loading || total >= MAX_CASES}
+      >
+        {loading ? (
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+        ) : (
+          <Sparkles className="size-4" aria-hidden />
+        )}
+        {loading
+          ? "Gerando…"
+          : total >= MAX_CASES
+            ? `Limite de ${MAX_CASES} casos`
+            : total === 0
+              ? "Gerar um caso"
+              : "Gerar mais um caso"}
+      </Button>
+      <AiWait active={loading} label={retryMsg ?? "Escrevendo o caso clínico"} />
+      <span aria-live="polite" className="sr-only">
+        {loading ? (retryMsg ?? "Gerando o caso clínico.") : ""}
+      </span>
+    </div>
   );
 }

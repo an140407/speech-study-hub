@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
  * As duas telas usam as mesmas chaves do React Query, então a busca acontece uma vez só.
  */
 
-export type TopicListItem = { id: string; title: string; created_at: string };
+export type TopicListItem = { id: string; title: string; created_at: string; folder_id: string | null };
 export type TopicProgress = {
   fcTotal: number;
   fcSeen: number;
@@ -25,7 +25,7 @@ export function useTopicsList() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("topics")
-        .select("id, title, created_at")
+        .select("id, title, created_at, folder_id")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data as TopicListItem[];

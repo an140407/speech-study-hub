@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { askJson, askText, PROFESSOR } from "./ai.server";
+import { CASE_RULES, MCQ_RULES } from "./ai-config";
 import type { GuidingQA } from "./study-types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -89,9 +90,11 @@ export const generateMoreMcq = createServerFn({ method: "POST" })
       mcq?: { question?: string; options?: string[]; correct_index?: number; explanation?: string; subtopic?: string }[];
     }>(
       `${PROFESSOR}
-Gere questões de múltipla escolha novas, no estilo de prova de graduação.
+Gere questões de múltipla escolha novas.
 Responda SOMENTE com JSON: { "mcq": [{ "question": "string", "options": ["a","b","c","d"], "correct_index": 0, "explanation": "string", "subtopic": "string" }] }
-Cada questão tem EXATAMENTE 4 alternativas, correct_index entre 0 e 3, e "subtopic" igual a um dos sub-tópicos permitidos.`,
+Cada questão tem EXATAMENTE 4 alternativas, correct_index entre 0 e 3, e "subtopic" igual a um dos sub-tópicos permitidos.
+
+${MCQ_RULES}`,
       `Tema: "${title}".
 Sub-tópicos permitidos: ${allowed.join(" | ")}.
 Gere exatamente ${data.count} questões NOVAS.
@@ -211,8 +214,9 @@ export const generateClinicalCase = createServerFn({ method: "POST" })
     }>(
       `${PROFESSOR}
 Crie um caso clínico completo e realista.
-Responda SOMENTE com JSON: { "scenario": "string (150 a 250 palavras)", "guiding_questions": [{ "question": "string", "answer": "string (resposta completa)" }], "case_explanation": "string (raciocínio clínico geral e conduta esperada, 100 a 200 palavras)" }
-Use de 5 a 10 perguntas guiadas, cada uma com sua resposta.`,
+Responda SOMENTE com JSON: { "scenario": "string", "guiding_questions": [{ "question": "string", "answer": "string (resposta completa)" }], "case_explanation": "string" }
+
+${CASE_RULES}`,
       `Tema: "${title}".
 Casos já existentes (crie um diferente destes): ${(existing ?? []).map((c: { scenario: string }) => c.scenario.slice(0, 160)).join(" // ") || "nenhum"}`,
     );

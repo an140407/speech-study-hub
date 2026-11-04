@@ -9,6 +9,7 @@ import {
   Loader2,
   Paperclip,
   Search,
+  FolderInput,
   Trash2,
   X,
 } from "lucide-react";
@@ -25,8 +26,9 @@ import {
   transcribeTopicSource,
 } from "@/lib/source.functions";
 import { Checkbox } from "@/components/ui/checkbox";
-import { aiErrorMessage, withAiRetry } from "@/lib/ai-busy";
+import { aiErrorMessage, aiRetryLabel, withAiRetry } from "@/lib/ai-busy";
 import { Button } from "@/components/ui/button";
+import { AiWait } from "@/components/study/AiWait";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,6 +52,8 @@ import {
   useTopicsList,
   useTopicsProgress,
 } from "@/lib/topics-index";
+import { folderPath, useFolders } from "@/lib/folders";
+import { MoveTopicDialog } from "@/components/folders/FolderDialogs";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
@@ -79,6 +83,8 @@ const EXAMPLES = [
   "Gagueira do desenvolvimento",
   "Presbiacusia",
 ];
+
+const MB = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 function Index() {
   const [topic, setTopic] = useState("");
@@ -135,6 +141,15 @@ function Index() {
   const [dragging, setDragging] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{
+    id: string;
+    title: string;
+    folder_id: string | null;
+  } | null>(null);
+  const folders = useFolders();
+  const modules = useMemo(() => (folders.data ?? []).filter((f) => !f.parent_id), [folders.data]);
+  // Filtro por pasta: "todos", "sem-pasta" ou o id de uma disciplina (inclui as unidades dela).
+  const [folderFilter, setFolderFilter] = useState("todos");
   const [deleting, setDeleting] = useState(false);
 
   async function confirmDeleteTopic() {
@@ -156,10 +171,25 @@ function Index() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("pt-BR");
+    const all = folders.data ?? [];
+    const inFilter = (folderId: string | null) => {
+      if (folderFilter === "todos") return true;
+      const f = folderId ? all.find((x) => x.id === folderId) : undefined;
+      if (folderFilter === "sem-pasta") return !f;
+      return !!f && (f.id === folderFilter || f.parent_id === folderFilter);
+    };
     return (topics.data ?? [])
-      .map((t) => ({ ...t, label: cleanTitle(t.title) }))
-      .filter((t) => !q || t.label.replace(/\u00A0/g, " ").toLocaleLowerCase("pt-BR").includes(q));
-  }, [topics.data, search]);
+      .map((t) => ({ ...t, label: cleanTitle(t.title), path: folderPath(all, t.folder_id) }))
+      .filter((t) => inFilter(t.folder_id))
+      .filter(
+        (t) =>
+          !q ||
+          t.label
+            .replace(/\u00A0/g, " ")
+            .toLocaleLowerCase("pt-BR")
+            .includes(q),
+      );
+  }, [topics.data, folders.data, folderFilter, search]);
 
   const totals = progress.data?.totals;
   const fcPct = totals?.fcTotal ? Math.round((totals.fcSeen * 100) / totals.fcTotal) : 0;
@@ -182,7 +212,7 @@ function Index() {
     }
     const maxBytes = 50 * 1024 * 1024;
     if (file.size > maxBytes) {
-      toast.error("Arquivo muito grande — o limite é 50MB.");
+      toast.error("Arquivo muito grande — o limite é 50 MB.");
       return;
     }
     setTopic("");
@@ -244,12 +274,9 @@ function Index() {
     return res;
   }
 
-  /** IA congestionada: avisa e mostra a espera; o withAiRetry tenta de novo sozinho. */
+  /** IA congestionada: mostra a espera na linha de status; o withAiRetry tenta de novo sozinho. */
   function onAiBusy(waitSeconds: number, nextStage: string) {
-    toast.info(
-      `O servidor da IA está congestionado — tentando de novo em ${waitSeconds}s. Pode demorar alguns segundos a mais.`,
-    );
-    setStage(`Servidor da IA congestionado, tentando de novo em ${waitSeconds}s…`);
+    setStage(aiRetryLabel(waitSeconds));
     setTimeout(() => setStage(nextStage), waitSeconds * 1000);
   }
 
@@ -324,7 +351,7 @@ function Index() {
                 <span className="truncate text-lg sm:text-xl">{attachedFile.file.name}</span>
                 <span className="shrink-0 text-xs text-muted-foreground tnum">
                   {attachedFile.kind.toUpperCase()} ·{" "}
-                  {(attachedFile.file.size / 1024 / 1024).toFixed(1).replace(".", ",")} MB
+                  {MB.format(attachedFile.file.size / 1024 / 1024)}&nbsp;MB
                 </span>
                 <button
                   type="button"
@@ -352,7 +379,7 @@ function Index() {
                   autoComplete="off"
                   disabled={loading}
                   maxLength={120}
-                  className="h-14 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-[#77716a] disabled:opacity-60 sm:text-2xl"
+                  className="h-14 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-muted-foreground disabled:opacity-60 sm:text-2xl"
                 />
               </>
             )}
@@ -415,11 +442,17 @@ function Index() {
               envie o PDF. A prévia fica mais fiel e não precisa de conversão.
             </p>
           )}
-          <p aria-live="polite" className={cn("text-sm text-muted-foreground", loading && "mt-3")}>
-            {loading
-              ? `${stage ?? "Gerando o material…"} Isso costuma levar de 20 a 90 segundos.`
-              : ""}
+          <p aria-live="polite" className="sr-only">
+            {loading ? (stage ?? "Gerando o material…") : ""}
           </p>
+          {loading && (
+            <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <AiWait active label={stage ?? "Gerando o material…"} />
+              <span className="text-xs text-muted-foreground">
+                Costuma levar de 20 a 90 segundos.
+              </span>
+            </div>
+          )}
           {!loading && !attachedFile && (
             <p className="mt-3 flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
               <span className="mr-1">Sugestões:</span>
@@ -492,6 +525,31 @@ function Index() {
           </div>
         </div>
 
+        {modules.length > 0 && (
+          <div role="group" aria-label="Filtrar por pasta" className="mb-4 flex flex-wrap gap-1.5">
+            {[
+              { id: "todos", name: "Todos" },
+              ...modules,
+              { id: "sem-pasta", name: "Sem pasta" },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                aria-pressed={folderFilter === f.id}
+                onClick={() => setFolderFilter(f.id)}
+                className={cn(
+                  "h-8 rounded-md border px-3 text-[0.8125rem] transition-colors",
+                  folderFilter === f.id
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                )}
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div
           aria-hidden
           className="hidden border-b-[1.5px] border-foreground pb-2 text-[0.6875rem] font-medium uppercase tracking-[0.1em] text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_72px_84px_84px_128px_40px] md:gap-4"
@@ -508,7 +566,7 @@ function Index() {
           <ul aria-label="Carregando tópicos" className="divide-y divide-border">
             {[64, 48, 72].map((w, i) => (
               <li key={i} className="py-5">
-                <div className="h-5 rounded bg-black/[0.06]" style={{ width: `${w}%` }} />
+                <div className="h-5 rounded bg-foreground/[0.06]" style={{ width: `${w}%` }} />
               </li>
             ))}
           </ul>
@@ -521,7 +579,9 @@ function Index() {
           </div>
         ) : !filtered.length ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            Nenhum tópico encontrado para “{search}”.
+            {search.trim()
+              ? `Nenhum tópico encontrado para “${search.trim()}”.`
+              : "Nenhum tópico nesta pasta."}
           </p>
         ) : (
           <ul className="divide-y divide-border border-b border-border">
@@ -543,6 +603,11 @@ function Index() {
                     >
                       {t.label}
                     </Link>
+                    {t.path && (
+                      <p className="relative z-[1] mt-1 truncate text-xs text-muted-foreground">
+                        {t.path}
+                      </p>
+                    )}
                     <p className="mt-1.5 text-xs text-muted-foreground tnum md:hidden">
                       {shortDate(t.created_at)} · {p?.fcSeen ?? 0}/{p?.fcTotal ?? 0} flashcards ·{" "}
                       {p?.mcSeen ?? 0}/{p?.mcTotal ?? 0} questões · {pct}%
@@ -589,6 +654,14 @@ function Index() {
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem
+                          onSelect={() =>
+                            setMoveTarget({ id: t.id, title: t.label, folder_id: t.folder_id })
+                          }
+                          className="gap-2"
+                        >
+                          <FolderInput className="size-4" aria-hidden /> Mover para pasta
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onSelect={() => setDeleteTarget({ id: t.id, title: t.label })}
                           className="gap-2 text-destructive focus:text-destructive"
                         >
@@ -603,6 +676,8 @@ function Index() {
           </ul>
         )}
       </section>
+
+      <MoveTopicDialog topic={moveTarget} onOpenChange={(o) => !o && setMoveTarget(null)} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>

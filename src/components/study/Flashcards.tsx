@@ -13,6 +13,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { AiWait } from "@/components/study/AiWait";
+import { aiErrorMessage, aiRetryLabel, withAiRetry } from "@/lib/ai-busy";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -582,6 +584,7 @@ function GenerateFlashcardsDialog({
   const [count, setCount] = useState(5);
   const [focus, setFocus] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
   const generate = useServerFn(generateMoreFlashcards);
   const queryClient = useQueryClient();
   const remaining = Math.max(0, MAX_CARDS - total);
@@ -595,20 +598,23 @@ function GenerateFlashcardsDialog({
   async function run() {
     setLoading(true);
     try {
-      const res = await generate({
-        data: {
-          topic_id: topicId,
-          count: Math.max(1, Math.min(count, maxBatch)),
-          subtopics: focus.length ? focus : undefined,
-        },
-      });
+      const payload = {
+        topic_id: topicId,
+        count: Math.max(1, Math.min(count, maxBatch)),
+        subtopics: focus.length ? focus : undefined,
+      };
+      const res = await withAiRetry(
+        () => generate({ data: payload }),
+        (s) => setRetryMsg(aiRetryLabel(s)),
+      );
       await queryClient.invalidateQueries({ queryKey: ["topic", topicId] });
       toast.success(`${res.inserted} flashcards adicionados.`);
       setOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Falha ao gerar flashcards.");
+      toast.error(aiErrorMessage(e, "Falha ao gerar flashcards."));
     } finally {
       setLoading(false);
+      setRetryMsg(null);
     }
   }
 
@@ -649,14 +655,17 @@ function GenerateFlashcardsDialog({
             </div>
           )}
         </div>
-        <DialogFooter>
+        <DialogFooter className="sm:items-center">
+          <AiWait
+            active={loading}
+            label={retryMsg ?? "Escrevendo os flashcards"}
+            className="justify-center sm:mr-auto"
+          />
+          <span aria-live="polite" className="sr-only">
+            {loading ? (retryMsg ?? "Gerando os flashcards.") : ""}
+          </span>
           <Button onClick={run} disabled={loading || remaining === 0}>
-            {loading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Sparkles className="size-4" />
-            )}
-            {loading ? "Gerando…" : "Gerar"}
+            <Sparkles className="size-4" aria-hidden /> Gerar
           </Button>
         </DialogFooter>
       </DialogContent>

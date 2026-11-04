@@ -1,5 +1,6 @@
 import type { GeneratedMaterial } from "./study-types";
 import { aiBusyError, isAiBusy, isBusyStatus } from "./ai-busy";
+import { CASE_RULES, MCQ_RULES, MODEL_FALLBACK, MODEL_MAIN, shouldFallback } from "./ai-config";
 
 const SYSTEM_PROMPT = `Você é um professor universitário de Fonoaudiologia no Brasil. Gere material de estudo em português do Brasil, com rigor acadêmico e linguagem clara para estudantes de graduação.
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
@@ -10,11 +11,15 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
   "clinical_case": {
     "scenario": "string",
     "guiding_questions": [{ "question": "string", "answer": "string (resposta completa e correta da pergunta guiada)" }],
-    "case_explanation": "string (explicação geral de todo o caso: raciocínio clínico, o que o quadro sugere, e conduta esperada; 100 a 200 palavras)"
+    "case_explanation": "string (diagnóstico mais provável, raciocínio e conduta esperada; ver regras do caso clínico)"
   },
   "review_questions": ["string"]
 }
-Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 5 a 10 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.`;
+Regras: mindmap com 4 a 6 ramos e 3 a 5 filhos cada; todo flashcard e toda questão de mcq precisa ter "subtopic" igual ao título de um branch existente do mindmap (nunca invente um subtopic fora da lista de branches); flashcards de 8 a 12; mcq com EXATAMENTE 10 questões, cada uma com exatamente 4 alternativas e correct_index entre 0 e 3; clinical_case com 5 a 10 guiding_questions, cada uma já com sua resposta; review_questions de 5 a 8.
+
+${MCQ_RULES}
+
+${CASE_RULES}`;
 
 const SYSTEM_PROMPT_PDF = `Você é um professor universitário de Fonoaudiologia no Brasil. Vai receber um PDF de aula, slide ou material de estudo. Primeiro identifique o tema central e específico coberto no PDF (um título curto, no mesmo estilo de "Disfagia orofaríngea" ou "Paralisia facial periférica" — nunca genérico como "Fonoaudiologia" ou "Aula 3"). Depois gere material de estudo em português do Brasil, com rigor acadêmico, baseado no CONTEÚDO REAL do PDF (não invente fatos que não estejam nele ou que não sejam de conhecimento consolidado da área).
 Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSON) exatamente nesta estrutura:
@@ -26,11 +31,15 @@ Responda SOMENTE com um objeto JSON válido (sem markdown, sem texto fora do JSO
   "clinical_case": {
     "scenario": "string",
     "guiding_questions": [{ "question": "string", "answer": "string (resposta completa e correta da pergunta guiada)" }],
-    "case_explanation": "string (explicação geral de todo o caso; 100 a 200 palavras)"
+    "case_explanation": "string (diagnóstico mais provável, raciocínio e conduta esperada; ver regras do caso clínico)"
   },
   "review_questions": ["string"]
 }
-Regras: mesmas do material padrão — mindmap com 4 a 6 ramos e 3 a 5 filhos; flashcards e mcq sempre com "subtopic" igual a um branch existente; flashcards de 8 a 12; mcq com EXATAMENTE 10 questões (4 alternativas cada); clinical_case com 5 a 10 guiding_questions já respondidas; review_questions de 5 a 8. Se o arquivo cobrir mais de um tema (ex.: um cronograma de semestre com várias aulas), IGNORE conteúdo administrativo (ementa, critérios de avaliação, cronograma, capa) e escolha só o primeiro assunto técnico/clínico substancial — gere material completo só sobre ele, não sobre o curso inteiro.`;
+Regras: mesmas do material padrão — mindmap com 4 a 6 ramos e 3 a 5 filhos; flashcards e mcq sempre com "subtopic" igual a um branch existente; flashcards de 8 a 12; mcq com EXATAMENTE 10 questões (4 alternativas cada); clinical_case com 5 a 10 guiding_questions já respondidas; review_questions de 5 a 8. Se o arquivo cobrir mais de um tema (ex.: um cronograma de semestre com várias aulas), IGNORE conteúdo administrativo (ementa, critérios de avaliação, cronograma, capa) e escolha só o primeiro assunto técnico/clínico substancial — gere material completo só sobre ele, não sobre o curso inteiro.
+
+${MCQ_RULES}
+
+${CASE_RULES}`;
 
 function extractJson(raw: string): string {
   let text = raw.trim();
@@ -105,33 +114,38 @@ async function callModel(topic: string): Promise<string> {
   const geminiKey = process.env["GEMINI_API_KEY"];
 
   if (geminiKey) {
-    const model = "gemini-3.1-flash-lite";
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          // 32000 é o mesmo valor que o MedReview usa — o padrão da API (sem isso)
-          // já cortou material grande no passado (ver histórico do MedReview).
-          generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 50000 },
-        }),
-      },
-    );
-    if (!res.ok) {
-      const body = await res.text();
-      console.error("Gemini error", res.status, body);
-      throw isBusyStatus(res.status) ? aiBusyError(res.status) : new Error(`Erro na API do Gemini (${res.status}).`);
+    // Tenta o modelo principal; se ele estiver sem cota, congestionado ou indisponível, usa o reserva.
+    let lastStatus = 0;
+    for (const model of [MODEL_MAIN, MODEL_FALLBACK]) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+            // Sem um teto alto, a API já cortou material grande no passado.
+            generationConfig: { responseMimeType: "application/json", temperature: 0.7, maxOutputTokens: 50000 },
+          }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        console.error("Gemini error", model, res.status, body);
+        lastStatus = res.status;
+        if (model === MODEL_MAIN && shouldFallback(res.status)) continue;
+        throw isBusyStatus(res.status) ? aiBusyError(res.status) : new Error(`Erro na API do Gemini (${res.status}).`);
+      }
+      const json = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+      };
+      if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+        throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente de novo.");
+      }
+      return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
     }
-    const json = (await res.json()) as {
-      candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
-    };
-    if (json.candidates?.[0]?.finishReason === "MAX_TOKENS") {
-      throw new Error("A resposta da IA foi cortada por ficar grande demais. Tente de novo.");
-    }
-    return json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    throw isBusyStatus(lastStatus) ? aiBusyError(lastStatus) : new Error(`Erro na API do Gemini (${lastStatus}).`);
   }
 
   const lovableKey = process.env["LOVABLE_API_KEY"];
@@ -303,7 +317,8 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
   if (!geminiKey) {
     throw new Error(`Gerar a partir de ${sourceLabel} exige a chave própria do Gemini (GEMINI_API_KEY) configurada nos Secrets.`);
   }
-  const model = "gemini-3.1-flash-lite";
+  // Começa pelo modelo principal; se ele estiver sem cota, congestionado ou indisponível, a nova tentativa usa o reserva.
+  let model = MODEL_MAIN;
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -317,8 +332,9 @@ async function generateFromParts(userParts: GeminiPart[], sourceLabel: string): 
     });
     if (!res.ok) {
       const body = await res.text();
-      console.error(`Gemini ${sourceLabel} error`, res.status, body);
+      console.error(`Gemini ${sourceLabel} error`, model, res.status, body);
       lastError = isBusyStatus(res.status) ? aiBusyError(res.status) : new Error(`Erro na API do Gemini (${res.status}).`);
+      if (model === MODEL_MAIN && shouldFallback(res.status)) model = MODEL_FALLBACK;
       continue;
     }
     const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[] };
