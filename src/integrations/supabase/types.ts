@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -42,6 +42,92 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "clinical_cases_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      essay_answers: {
+        Row: {
+          answer: string
+          created_at: string
+          feedback: Json | null
+          id: string
+          question_id: string
+          score: number | null
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          answer: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          question_id: string
+          score?: number | null
+          topic_id: string
+          user_id?: string
+        }
+        Update: {
+          answer?: string
+          created_at?: string
+          feedback?: Json | null
+          id?: string
+          question_id?: string
+          score?: number | null
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "essay_answers_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "essay_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "essay_answers_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      essay_questions: {
+        Row: {
+          created_at: string
+          expected_answer: string
+          id: string
+          question: string
+          rubric: Json
+          subtopic: string | null
+          topic_id: string
+        }
+        Insert: {
+          created_at?: string
+          expected_answer?: string
+          id?: string
+          question: string
+          rubric?: Json
+          subtopic?: string | null
+          topic_id: string
+        }
+        Update: {
+          created_at?: string
+          expected_answer?: string
+          id?: string
+          question?: string
+          rubric?: Json
+          subtopic?: string | null
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "essay_questions_topic_id_fkey"
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "topics"
@@ -87,31 +173,31 @@ export type Database = {
       }
       flashcards: {
         Row: {
-          origin_mcq_id: string | null
           back: string
           created_at: string
           front: string
           id: string
+          origin_mcq_id: string | null
           seen_at: string | null
           subtopic: string | null
           topic_id: string
         }
         Insert: {
-          origin_mcq_id?: string | null
           back: string
           created_at?: string
           front: string
           id?: string
+          origin_mcq_id?: string | null
           seen_at?: string | null
           subtopic?: string | null
           topic_id: string
         }
         Update: {
-          origin_mcq_id?: string | null
           back?: string
           created_at?: string
           front?: string
           id?: string
+          origin_mcq_id?: string | null
           seen_at?: string | null
           subtopic?: string | null
           topic_id?: string
@@ -129,6 +215,41 @@ export type Database = {
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      folders: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          parent_id: string | null
+          position: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          parent_id?: string | null
+          position?: number
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          parent_id?: string | null
+          position?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
             referencedColumns: ["id"]
           },
         ]
@@ -206,6 +327,64 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "materials_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcq_attempts: {
+        Row: {
+          chosen_index: number
+          created_at: string
+          exam_attempt_id: string | null
+          id: string
+          is_correct: boolean
+          question_id: string
+          source: string
+          topic_id: string
+          user_id: string
+        }
+        Insert: {
+          chosen_index: number
+          created_at?: string
+          exam_attempt_id?: string | null
+          id?: string
+          is_correct: boolean
+          question_id: string
+          source: string
+          topic_id: string
+          user_id?: string
+        }
+        Update: {
+          chosen_index?: number
+          created_at?: string
+          exam_attempt_id?: string | null
+          id?: string
+          is_correct?: boolean
+          question_id?: string
+          source?: string
+          topic_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcq_attempts_exam_attempt_id_fkey"
+            columns: ["exam_attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcq_attempts_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "mcq_questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcq_attempts_topic_id_fkey"
             columns: ["topic_id"]
             isOneToOne: false
             referencedRelation: "topics"
@@ -304,236 +483,6 @@ export type Database = {
           text?: string | null
         }
         Relationships: []
-      }
-      topics: {
-        Row: {
-          folder_id: string | null
-          created_at: string
-          id: string
-          source_hash: string | null
-          source_kind: string | null
-          source_name: string | null
-          source_text: string | null
-          title: string
-          user_id: string | null
-        }
-        Insert: {
-          folder_id?: string | null
-          created_at?: string
-          id?: string
-          source_hash?: string | null
-          source_kind?: string | null
-          source_name?: string | null
-          source_text?: string | null
-          title: string
-          user_id?: string | null
-        }
-        Update: {
-          folder_id?: string | null
-          created_at?: string
-          id?: string
-          source_hash?: string | null
-          source_kind?: string | null
-          source_name?: string | null
-          source_text?: string | null
-          title?: string
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "topics_folder_id_fkey"
-            columns: ["folder_id"]
-            isOneToOne: false
-            referencedRelation: "folders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "topics_source_hash_fkey"
-            columns: ["source_hash"]
-            isOneToOne: false
-            referencedRelation: "source_files"
-            referencedColumns: ["hash"]
-          },
-        ]
-      }
-      essay_answers: {
-        Row: {
-          answer: string
-          created_at: string
-          feedback: Json | null
-          id: string
-          question_id: string
-          score: number | null
-          topic_id: string
-          user_id: string
-        }
-        Insert: {
-          answer: string
-          created_at?: string
-          feedback?: Json | null
-          id?: string
-          question_id: string
-          score?: number | null
-          topic_id?: string
-          user_id?: string
-        }
-        Update: {
-          answer?: string
-          created_at?: string
-          feedback?: Json | null
-          id?: string
-          question_id?: string
-          score?: number | null
-          topic_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "essay_answers_question_id_fkey"
-            columns: ["question_id"]
-            isOneToOne: false
-            referencedRelation: "essay_questions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "essay_answers_topic_id_fkey"
-            columns: ["topic_id"]
-            isOneToOne: false
-            referencedRelation: "topics"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      essay_questions: {
-        Row: {
-          created_at: string
-          expected_answer: string
-          id: string
-          question: string
-          rubric: Json
-          subtopic: string | null
-          topic_id: string
-        }
-        Insert: {
-          created_at?: string
-          expected_answer?: string
-          id?: string
-          question: string
-          rubric?: Json
-          subtopic?: string | null
-          topic_id: string
-        }
-        Update: {
-          created_at?: string
-          expected_answer?: string
-          id?: string
-          question?: string
-          rubric?: Json
-          subtopic?: string | null
-          topic_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "essay_questions_topic_id_fkey"
-            columns: ["topic_id"]
-            isOneToOne: false
-            referencedRelation: "topics"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      folders: {
-        Row: {
-          created_at: string
-          id: string
-          name: string
-          parent_id: string | null
-          position: number
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          name: string
-          parent_id?: string | null
-          position?: number
-          user_id?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          name?: string
-          parent_id?: string | null
-          position?: number
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "folders_parent_id_fkey"
-            columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "folders"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      mcq_attempts: {
-        Row: {
-          chosen_index: number
-          created_at: string
-          exam_attempt_id: string | null
-          id: string
-          is_correct: boolean
-          question_id: string
-          source: string
-          topic_id: string
-          user_id: string
-        }
-        Insert: {
-          chosen_index: number
-          created_at?: string
-          exam_attempt_id?: string | null
-          id?: string
-          is_correct?: boolean
-          question_id: string
-          source: string
-          topic_id?: string
-          user_id?: string
-        }
-        Update: {
-          chosen_index?: number
-          created_at?: string
-          exam_attempt_id?: string | null
-          id?: string
-          is_correct?: boolean
-          question_id?: string
-          source?: string
-          topic_id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "mcq_attempts_exam_attempt_id_fkey"
-            columns: ["exam_attempt_id"]
-            isOneToOne: false
-            referencedRelation: "exam_attempts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "mcq_attempts_question_id_fkey"
-            columns: ["question_id"]
-            isOneToOne: false
-            referencedRelation: "mcq_questions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "mcq_attempts_topic_id_fkey"
-            columns: ["topic_id"]
-            isOneToOne: false
-            referencedRelation: "topics"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       topic_chat_messages: {
         Row: {
@@ -656,15 +605,62 @@ export type Database = {
           },
         ]
       }
+      topics: {
+        Row: {
+          created_at: string
+          folder_id: string | null
+          id: string
+          source_hash: string | null
+          source_kind: string | null
+          source_name: string | null
+          source_text: string | null
+          title: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          folder_id?: string | null
+          id?: string
+          source_hash?: string | null
+          source_kind?: string | null
+          source_name?: string | null
+          source_text?: string | null
+          title: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          folder_id?: string | null
+          id?: string
+          source_hash?: string | null
+          source_kind?: string | null
+          source_name?: string | null
+          source_text?: string | null
+          title?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topics_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_source_hash_fkey"
+            columns: ["source_hash"]
+            isOneToOne: false
+            referencedRelation: "source_files"
+            referencedColumns: ["hash"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      set_topic_material: {
-        Args: { p_content: Json; p_topic_id: string; p_type: string }
-        Returns: undefined
-      }
       add_clinical_case: {
         Args: {
           p_case_explanation: string
@@ -709,6 +705,10 @@ export type Database = {
       }
       set_mcq_subtopic: {
         Args: { p_mcq_id: string; p_subtopic: string }
+        Returns: undefined
+      }
+      set_topic_material: {
+        Args: { p_content: Json; p_topic_id: string; p_type: string }
         Returns: undefined
       }
       update_clinical_case_content: {
