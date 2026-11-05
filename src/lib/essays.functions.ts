@@ -167,7 +167,7 @@ ${data.answer}
 
     const { data: saved, error: insertError } = await context.supabase
       .from("essay_answers")
-      .insert({ question_id: q.id, answer: data.answer, score, feedback })
+      .insert({ question_id: q.id, topic_id: q.topic_id, answer: data.answer, score, feedback })
       .select("id, created_at")
       .single();
     if (insertError || !saved)
