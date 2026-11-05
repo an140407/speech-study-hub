@@ -397,9 +397,9 @@ export async function generateSummaryHtml(title: string, source: SummarySource):
   try {
     result = await geminiText(STRONG_MODEL, SUMMARY_PROMPT, parts);
   } catch (e) {
-    // Modelo forte indisponível, sem cota ou sobrecarregado: cai no modelo rápido.
+    // Modelo forte indisponível, sem cota, sobrecarregado ou demorando demais: cai no modelo rápido.
     const status = (e as { status?: number }).status;
-    if (status && [403, 404, 429, 500, 503].includes(status)) {
+    if (status && (status === 403 || status === 404 || isBusyStatus(status))) {
       result = await geminiText(FAST_MODEL, SUMMARY_PROMPT, parts);
     } else {
       throw e;

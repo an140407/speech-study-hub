@@ -3,7 +3,9 @@
 
 export const AI_BUSY_TAG = "[IA_CONGESTIONADA]";
 
-const BUSY_STATUSES = new Set([429, 500, 502, 503, 504]);
+// 429 = limite; 5xx = servidor fora ou sobrecarregado; 408/52x = a resposta demorou demais
+// (524 = tempo esgotado no meio do caminho). Em todos, vale esperar e tentar de novo.
+const BUSY_STATUSES = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
 
 export function isBusyStatus(status: number) {
   return BUSY_STATUSES.has(status);

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import type { McqRow } from "@/lib/study-types";
 
 /**
@@ -29,13 +30,15 @@ export async function recordAttempts(
   rows: { question_id: string; chosen_index: number; source: AttemptSource; exam_attempt_id?: string | null }[],
 ) {
   if (!rows.length) return;
+  // topic_id e is_correct são preenchidos pelo trigger do banco (mcq_attempts_fill);
+  // o tipo gerado não sabe disso, então o envio é tipado à mão.
   const { error } = await supabase.from("mcq_attempts").insert(
     rows.map((r) => ({
       question_id: r.question_id,
       chosen_index: r.chosen_index,
       source: r.source,
       exam_attempt_id: r.exam_attempt_id ?? null,
-    })),
+    })) as unknown as Database["public"]["Tables"]["mcq_attempts"]["Insert"][],
   );
   // Registrar a resposta nunca pode atrapalhar o estudo: só avisa no console.
   if (error) console.error("Falha ao registrar resposta", error);
