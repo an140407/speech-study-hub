@@ -113,7 +113,7 @@ export const gradeEssay = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: q, error } = await context.supabase
       .from("essay_questions")
-      .select("id, question, expected_answer, rubric")
+      .select("id, topic_id, question, expected_answer, rubric")
       .eq("id", data.question_id)
       .single();
     if (error || !q) throw new Error("Pergunta não encontrada.");
